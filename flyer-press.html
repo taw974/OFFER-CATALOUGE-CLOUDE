@@ -3259,6 +3259,7 @@ function strongTok(list){
   list.forEach(function(t){ if(!isWeakTok(t) && t.length>1 && !seen[t]){ seen[t]=1; out.push(t); } });
   return out;
 }
+/* letters and digits only: "TMT/SUE" and a file saved as "TMT_SUE" give the same key */
 function slugKey(s){
   return String(s).toLowerCase().replace(/\.(png|jpe?g|webp|gif|avif|bmp|tiff?)$/,"")
     .replace(/[^a-z0-9]+/g,"");
@@ -4313,6 +4314,12 @@ function saveTextFile(name, text, mime){
   document.body.appendChild(a); a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1500);
 }
+/* a name Windows will take as a file name: / \ : * ? " < > | become _ (as a
+   renamed photo has them).  The matching treats _ and / alike, so a photo saved
+   under this name finds its product. */
+function fileSafe(n){
+  return String(n||"").replace(/[\\\/:*?"<>|]/g,"_").replace(/[\u0000-\u001f]/g,"").replace(/[. ]+$/,"").trim();
+}
 function exportMissing(kind){
   var L=missingPhotoList();
   if(!L.length){ toast("Every product on this branch already has a photo."); return; }
@@ -4321,18 +4328,18 @@ function exportMissing(kind){
   if(kind==="csv"){
     var rows=[["PRODUCT NAME","SAVE THE PHOTO AS","QUANTITY"]];
     L.forEach(function(p){ var q=numSig(p.name).qty.join(" ");
-      rows.push([p.name, slugify(p.name)+".png", q]); });
+      rows.push([p.name, fileSafe(p.name)+".png", q]); });
     var csv="\ufeff"+rows.map(function(r){ return r.map(function(v){ return '"'+String(v).replace(/"/g,'""')+'"'; }).join(","); }).join("\r\n");
     saveTextFile(br+"-photos-needed-"+stamp+".csv", csv, "text/csv;charset=utf-8");
   } else if(kind==="copy"){
-    var txt=L.map(function(p){ return p.name; }).join("\n");
+    var txt=L.map(function(p){ return fileSafe(p.name); }).join("\n");
     if(navigator.clipboard && navigator.clipboard.writeText){
       navigator.clipboard.writeText(txt).then(function(){ toast(L.length+" name(s) copied — paste them into Notepad."); },
         function(){ saveTextFile(br+"-photos-needed-"+stamp+".txt", txt); });
     } else saveTextFile(br+"-photos-needed-"+stamp+".txt", txt);
     return;
   } else {
-    saveTextFile(br+"-photos-needed-"+stamp+".txt", L.map(function(p){ return p.name; }).join("\r\n"));
+    saveTextFile(br+"-photos-needed-"+stamp+".txt", L.map(function(p){ return fileSafe(p.name); }).join("\r\n"));
   }
   toast(L.length+" product(s) without a photo listed.");
 }

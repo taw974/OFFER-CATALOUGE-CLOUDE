@@ -712,7 +712,8 @@ function createBranchSheet() {
   var offer = tmpl.copyTo(ns).setName('OFFER');
   var guide = ss.getSheetByName(CFG.GUIDE); if (guide) guide.copyTo(ns).setName(CFG.GUIDE);
   ns.getSheets().forEach(function (s) { if (s.getName() !== 'OFFER' && s.getName() !== CFG.GUIDE) ns.deleteSheet(s); });
-  offer.getRange(CFG.FIRST, CFG.C.BC, fpRows(offer), CFG.HEAD.length - 1).clearContent();   /* a clean start, whatever the master held */
+  fpEnsureLayout(offer);
+  offer.getRange(CFG.FIRST, 2, fpRows(offer), CFG.HEAD.length - 1).clearContent();   /* a clean start from column B on (SL keeps its formula) */
   fpProtectEntry(offer);
   var g2 = ns.getSheetByName(CFG.GUIDE); if (g2) fpProtectWhole(g2);
   fpEnsureTrigger(ns);
@@ -838,7 +839,8 @@ function addBranchTab() {
   var name = String(r.getResponseText() || '').trim(); if (!name) return;
   if (ss.getSheetByName(name)) { ui.alert('A tab called “' + name + '” already exists.'); return; }
   var t = tmpl.copyTo(ss).setName(name);
-  t.getRange(CFG.FIRST, CFG.C.BC, fpRows(t), CFG.HEAD.length - 1).clearContent();
+  fpEnsureLayout(t);
+  t.getRange(CFG.FIRST, 2, fpRows(t), CFG.HEAD.length - 1).clearContent();
   fpProtectEntry(t);
   t.activate();
   ui.alert('Tab “' + name + '” is ready ✓', 'Copy its link (with gid=) into the flyer app for that branch.', ui.ButtonSet.OK);
