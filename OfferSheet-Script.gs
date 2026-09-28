@@ -1,5 +1,5 @@
 /**
- * OFFER ENTRY — the master sheet behind the flyer            (version 2.2)
+ * OFFER ENTRY — the master sheet behind the flyer            (version 2.3)
  * ------------------------------------------------------------------------
  * This file is the MASTER: it holds the DATABASE and runs everything.
  * Branch sheets are separate files made from here (Offer Tools → Create a
@@ -16,11 +16,16 @@
  * sheets). Only the heading row is locked; SL and BRAND → ROW STATE show a
  * warning when typed in. After pasting this version, run 1. Set up again once —
  * it unlocks the branch sheets that already exist.
+ *
+ * 2.3: CATEGORY comes after OFFER PRICE (1. Set up moves it in every tab; a tab
+ * not moved yet moves itself on its first edit). A barcode fills faster: the tab
+ * is read once, fewer writes, and branches no longer wait for each other.
  */
 
 var CFG = {
-  HEAD: ['SL','BARCODE','PRODUCT NAME','CATEGORY','C.P','S.P','OFFER PRICE','NOTE','BRAND','PACKING','CHECK','ROW STATE'],
-  C: {SL:1, BC:2, NAME:3, CAT:4, CP:5, SP:6, OFFER:7, NOTE:8, BRAND:9, PACK:10, CHECK:11, STATE:12},
+  HEAD: ['SL','BARCODE','PRODUCT NAME','C.P','S.P','OFFER PRICE','CATEGORY','NOTE','BRAND','PACKING','CHECK','ROW STATE'],
+  C: {SL:1, BC:2, NAME:3, CP:4, SP:5, OFFER:6, CAT:7, NOTE:8, BRAND:9, PACK:10, CHECK:11, STATE:12},
+  OLD_TO_NEW: {4:7, 5:4, 6:5, 7:6},     /* before 2.3 CATEGORY was column D, in front of the prices */
   FIRST: 2, ROWS: 500,                 /* ROWS: the rows a new tab starts with; the tab may grow or shrink */
   DB: 'DATABASE', MAP: 'CATEGORY MAP', LOG: 'UPDATES', GUIDE: 'GUIDE', BR: 'BRANCH SHEETS',
   BRH: ['BRANCH', 'LINK', 'SPREADSHEET ID', 'CREATED'],
@@ -254,12 +259,24 @@ function fpFromIndex(ix, bcText) {
   return ix.key[k] ? fpPick(ix.key[k]) : null;
 }
 function fpToday() { return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'); }
-function fpIsEntry(sh) {
+/** the heading row, trimmed */
+function fpHeads(sh) {
+  return sh.getRange(1, 1, 1, CFG.HEAD.length).getValues()[0].map(function (x) { return String(x).trim(); });
+}
+function fpIsEntry(sh, heads) {
   if (!sh) return false;
   var nm = sh.getName();
   if (nm === CFG.DB || nm === CFG.MAP || nm === CFG.LOG || nm === CFG.GUIDE || nm === CFG.BR) return false;
-  var h = sh.getRange(1, 1, 1, 3).getValues()[0];
-  return String(h[0]).trim() === 'SL' && String(h[1]).trim() === 'BARCODE' && String(h[2]).trim() === 'PRODUCT NAME';
+  var h = heads || sh.getRange(1, 1, 1, 3).getValues()[0].map(function (x) { return String(x).trim(); });
+  return h[0] === 'SL' && h[1] === 'BARCODE' && h[2] === 'PRODUCT NAME';
+}
+/** the layout before 2.3: CATEGORY in D, OFFER PRICE in G */
+function fpOldLayout(heads) { return heads[3] === 'CATEGORY' && heads[6] === 'OFFER PRICE'; }
+/** CATEGORY moves behind OFFER PRICE — with its dropdown, colours and data. true if it was moved. */
+function fpEnsureLayout(sh) {
+  if (!fpOldLayout(fpHeads(sh))) return false;
+  sh.moveColumns(sh.getRange('D:D'), 8);
+  return true;
 }
 /** the entry rows of a tab: from row 2 to its last row (rows may have been inserted or deleted) */
 function fpRows(sh) { return Math.max(1, sh.getMaxRows() - CFG.FIRST + 1); }
@@ -287,13 +304,24 @@ function fpAppendDb(db, rows) {
 /* ======================= the edit trigger (runs as the owner) ======================= */
 function handleEdit(e) {
   if (!e || !e.range) return;
-  var sh = e.range.getSheet();
-  if (!fpIsEntry(sh)) return;
-  var r0 = e.range.getRow(), nr = e.range.getNumRows(), c0 = e.range.getColumn(), nc = e.range.getNumColumns();
-  var first = Math.max(r0, CFG.FIRST), last = Math.min(r0 + nr - 1, CFG.FIRST + fpRows(sh) - 1);
-  if (last < first) return;
-  var hit = function (c) { return c0 <= c && c <= c0 + nc - 1; };
+  var sh = e.range.getSheet(), heads = fpHeads(sh);
+  if (!fpIsEntry(sh, heads)) return;
   var C = CFG.C, D = CFG.D;
+  var r0 = e.range.getRow(), nr = e.range.getNumRows(), c0 = e.range.getColumn(), nc = e.range.getNumColumns();
+  var cols = {};
+  for (var c = c0; c < c0 + nc; c++) cols[c] = 1;
+  if (fpOldLayout(heads)) {                            /* a tab from before 2.3: CATEGORY moves behind OFFER PRICE first */
+    var ml = LockService.getScriptLock();
+    if (!ml.tryLock(25000)) return;
+    try { fpEnsureLayout(sh); } finally { ml.releaseLock(); }
+    var moved = {};
+    Object.keys(cols).forEach(function (k) { moved[CFG.OLD_TO_NEW[k] || k] = 1; });
+    cols = moved;
+  }
+  var hit = function (c) { return !!cols[c]; };
+  var total = fpRows(sh);
+  var first = Math.max(r0, CFG.FIRST), last = Math.min(r0 + nr - 1, CFG.FIRST + total - 1);
+  if (last < first) return;
   if (hit(C.SL)) {                                     /* SL was typed over or cleared: its formula back */
     var slf = []; for (var q = first; q <= last; q++) slf.push([fpSlFormula(q)]);
     sh.getRange(first, C.SL, slf.length, 1).setFormulas(slf);
@@ -301,73 +329,93 @@ function handleEdit(e) {
   var bcHit = hit(C.BC), nameHit = hit(C.NAME), catHit = hit(C.CAT);
   var priceHit = hit(C.CP) || hit(C.SP) || hit(C.OFFER);
   if (!bcHit && !nameHit && !catHit && !priceHit) return;
-  var lock = LockService.getScriptLock();              /* one lock for the master and every branch sheet */
+
+  /* the master itself was edited: no need to open it again */
+  var mid = '';
+  try { mid = PropertiesService.getScriptProperties().getProperty('MASTER_ID') || ''; } catch (err) {}
+  if (!FP_MASTER && e.source && (!mid || e.source.getId() === mid)) FP_MASTER = e.source;
+  var db = fpMaster().getSheetByName(CFG.DB), today = fpToday();
+  if (!db) return;
+
+  /* the whole tab is read once; the database is only read here — no lock, so branches do not wait for each other */
+  var all = sh.getRange(CFG.FIRST, 1, total, CFG.HEAD.length).getValues();
+  var n = last - first + 1, off = first - CFG.FIRST;
+  var ix = (bcHit && n > CFG.BULK) ? fpLoadIndex(db) : null;
+  var find = function (bc) { return ix ? fpFromIndex(ix, bc) : fpFind(db, bc); };
+  var appendRows = [], dbSet = [];            // dbSet: {row, col, value}
+  for (var i = 0; i < n; i++) {
+    var v = all[off + i];
+    var bc = fpText(v[C.BC - 1]), name = String(v[C.NAME - 1] || '').trim(), cat = String(v[C.CAT - 1] || '').trim();
+    var state = String(v[C.STATE - 1] || '');
+    var outName = v[C.NAME - 1], outCat = v[C.CAT - 1], outBrand = v[C.BRAND - 1], outPack = v[C.PACK - 1], outState = state;
+    var typedName = nameHit && name, typedCat = catHit && cat;
+    if (bcHit) {
+      if (!bc) {
+        if (state === 'db' && !typedName) { outName = ''; outCat = ''; }   // only what the script had put there
+        outBrand = ''; outPack = '';
+        outState = (typedName || (name && state !== 'db')) ? 'nobc' : '';
+      } else {
+        var h = find(bc);
+        if (h) {
+          var dv = h.vals;
+          if (typedName) { if (name.toUpperCase() !== String(dv[D.NAME - 1]).toUpperCase()) { dbSet.push({row: h.row, col: D.NAME, value: name}, {row: h.row, col: D.NAMEBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
+          else outName = dv[D.NAME - 1];
+          if (typedCat) { if (cat !== String(dv[D.CAT - 1])) { dbSet.push({row: h.row, col: D.CAT, value: cat}, {row: h.row, col: D.CATBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
+          else outCat = dv[D.CAT - 1];
+          outBrand = dv[D.BRAND - 1]; outPack = dv[D.PACK - 1]; outState = 'db';
+        } else {
+          if (state === 'db' && !typedName) { outName = ''; name = ''; }
+          if (state === 'db' && !typedCat) { outCat = ''; cat = ''; }
+          outBrand = ''; outPack = '';
+          if (name) { appendRows.push(fpNewDbRow(bc, name, cat, today)); outState = 'added'; }
+          else outState = 'new';
+        }
+      }
+    } else if ((nameHit || catHit) && bc) {
+      /* a hand change on a row that has a barcode: into the database */
+      var h2 = fpFind(db, bc);
+      if (h2) {
+        if (nameHit && name && name.toUpperCase() !== String(h2.vals[D.NAME - 1]).toUpperCase())
+          dbSet.push({row: h2.row, col: D.NAME, value: name}, {row: h2.row, col: D.NAMEBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
+        if (catHit && cat && cat !== String(h2.vals[D.CAT - 1]))
+          dbSet.push({row: h2.row, col: D.CAT, value: cat}, {row: h2.row, col: D.CATBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
+        outState = 'db';
+      } else if (name) {
+        var pending = appendRows.some(function (a) { return fpText(a[0]) === bc; });
+        if (!pending) appendRows.push(fpNewDbRow(bc, name, cat, today));
+        outState = 'added';
+      } else outState = 'new';
+    } else if (nameHit && !bc) {
+      outState = name ? 'nobc' : '';
+      if (!name) { outBrand = ''; outPack = ''; }
+    }
+    v[C.NAME - 1] = outName; v[C.CAT - 1] = outCat; v[C.BRAND - 1] = outBrand; v[C.PACK - 1] = outPack; v[C.STATE - 1] = outState;
+  }
+
+  /* CHECK from what is in memory now; written for the edited rows, and elsewhere only where it changed */
+  var labels = fpCheckLabels(all), rest = [];
+  for (var j = 0; j < total; j++) {
+    if (j >= off && j < off + n) continue;
+    if (labels[j] !== String(all[j][C.CHECK - 1] || '')) rest.push(j);
+  }
+  var block = all.slice(off, off + n);
+  if (bcHit) {
+    sh.getRange(first, C.NAME, n, 1).setValues(block.map(function (r) { return [r[C.NAME - 1]]; }));
+    sh.getRange(first, C.CAT, n, 1).setValues(block.map(function (r) { return [r[C.CAT - 1]]; }));
+  }
+  sh.getRange(first, C.BRAND, n, C.STATE - C.BRAND + 1).setValues(block.map(function (r, k) {
+    return [r[C.BRAND - 1], r[C.PACK - 1], labels[off + k], r[C.STATE - 1]];
+  }));
+  if (rest.length > 20) sh.getRange(CFG.FIRST, C.CHECK, total, 1).setValues(labels.map(function (l) { return [l]; }));
+  else rest.forEach(function (k) { sh.getRange(CFG.FIRST + k, C.CHECK).setValue(labels[k]); });
+
+  /* only writing into the database waits for the other branches */
+  if (!dbSet.length && !appendRows.length) return;
+  var lock = LockService.getScriptLock();
   if (!lock.tryLock(25000)) return;
   try {
-    var db = fpMaster().getSheetByName(CFG.DB), today = fpToday();
-    if (!db) return;
-    var n = last - first + 1;
-    var vals = sh.getRange(first, 1, n, CFG.HEAD.length).getValues();
-    var ix = (bcHit && n > CFG.BULK) ? fpLoadIndex(db) : null;
-    var find = function (bc) { return ix ? fpFromIndex(ix, bc) : fpFind(db, bc); };
-    var appendRows = [], dbSet = [];            // dbSet: {row, col, value}
-    var cd = [], ij = [], st = [];              // what the script owns: C:D (on a barcode change), I:J, L
-    for (var i = 0; i < n; i++) {
-      var v = vals[i];
-      var bc = fpText(v[C.BC - 1]), name = String(v[C.NAME - 1] || '').trim(), cat = String(v[C.CAT - 1] || '').trim();
-      var state = String(v[C.STATE - 1] || '');
-      var outName = v[C.NAME - 1], outCat = v[C.CAT - 1], outBrand = v[C.BRAND - 1], outPack = v[C.PACK - 1], outState = state;
-      var typedName = nameHit && name, typedCat = catHit && cat;
-      if (bcHit) {
-        if (!bc) {
-          if (state === 'db' && !typedName) { outName = ''; outCat = ''; }   // only what the script had put there
-          outBrand = ''; outPack = '';
-          outState = (typedName || (name && state !== 'db')) ? 'nobc' : '';
-        } else {
-          var h = find(bc);
-          if (h) {
-            var dv = h.vals;
-            if (typedName) { if (name.toUpperCase() !== String(dv[D.NAME - 1]).toUpperCase()) { dbSet.push({row: h.row, col: D.NAME, value: name}, {row: h.row, col: D.NAMEBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
-            else outName = dv[D.NAME - 1];
-            if (typedCat) { if (cat !== String(dv[D.CAT - 1])) { dbSet.push({row: h.row, col: D.CAT, value: cat}, {row: h.row, col: D.CATBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
-            else outCat = dv[D.CAT - 1];
-            outBrand = dv[D.BRAND - 1]; outPack = dv[D.PACK - 1]; outState = 'db';
-          } else {
-            if (state === 'db' && !typedName) { outName = ''; name = ''; }
-            if (state === 'db' && !typedCat) { outCat = ''; cat = ''; }
-            outBrand = ''; outPack = '';
-            if (name) { appendRows.push(fpNewDbRow(bc, name, cat, today)); outState = 'added'; }
-            else outState = 'new';
-          }
-        }
-        cd.push([outName, outCat]);
-      } else if ((nameHit || catHit) && bc) {
-        /* a hand change on a row that has a barcode: into the database */
-        var h2 = fpFind(db, bc);
-        if (h2) {
-          if (nameHit && name && name.toUpperCase() !== String(h2.vals[D.NAME - 1]).toUpperCase())
-            dbSet.push({row: h2.row, col: D.NAME, value: name}, {row: h2.row, col: D.NAMEBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
-          if (catHit && cat && cat !== String(h2.vals[D.CAT - 1]))
-            dbSet.push({row: h2.row, col: D.CAT, value: cat}, {row: h2.row, col: D.CATBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
-          outState = 'db';
-        } else if (name) {
-          var pending = appendRows.some(function (a) { return fpText(a[0]) === bc; });
-          if (!pending) appendRows.push(fpNewDbRow(bc, name, cat, today));
-          outState = 'added';
-        } else outState = 'new';
-      } else if (nameHit && !bc) {
-        outState = name ? 'nobc' : '';
-        if (!name) { outBrand = ''; outPack = ''; }
-      }
-      ij.push([outBrand, outPack]);
-      st.push([outState]);
-    }
-    if (bcHit) sh.getRange(first, C.NAME, n, 2).setValues(cd);
-    sh.getRange(first, C.BRAND, n, 2).setValues(ij);
-    sh.getRange(first, C.STATE, n, 1).setValues(st);
     dbSet.forEach(function (w) { db.getRange(w.row, w.col).setValue(w.value); });
-    fpAppendDb(db, appendRows);
-    fpRecheck(sh);
+    fpAppendDb(db, appendRows.filter(function (a) { return !fpFind(db, fpText(a[0])); }));   /* another branch may have just added it */
   } finally {
     lock.releaseLock();
   }
@@ -382,6 +430,7 @@ function handleChange(e) {
   try {
     ss.getSheets().forEach(function (sh) {
       if (!fpIsEntry(sh)) return;
+      fpEnsureLayout(sh);
       fpFixRows(sh);
       if (t === 'INSERT_ROW') fpWarnRanges(sh);     /* rows added at the very bottom are covered as well */
       fpRecheck(sh);
@@ -390,16 +439,20 @@ function handleChange(e) {
     lock.releaseLock();
   }
 }
-/** the CHECK column for the whole tab: ⚠ for the same line twice, otherwise the row's state */
-function fpRecheck(sh) {
-  var C = CFG.C, n = fpRows(sh), v = sh.getRange(CFG.FIRST, 1, n, CFG.HEAD.length).getValues();
+/** the CHECK label of every row: ⚠ for the same line twice, otherwise the row's state */
+function fpCheckLabels(v) {
+  var C = CFG.C;
   var dup = fpDuplicates(v.map(function (r) { return [r[C.BC - 1], r[C.NAME - 1], r[C.CAT - 1], r[C.CP - 1], r[C.SP - 1], r[C.OFFER - 1]]; }));
-  var out = v.map(function (r, i) {
-    if (!fpText(r[C.BC - 1]) && !String(r[C.NAME - 1] || '').trim()) return [''];
-    if (dup[i]) return ['⚠ Same as SL ' + dup[i]];
-    return [fpStateLabel(String(r[C.STATE - 1] || ''))];
+  return v.map(function (r, i) {
+    if (!fpText(r[C.BC - 1]) && !String(r[C.NAME - 1] || '').trim()) return '';
+    if (dup[i]) return '⚠ Same as SL ' + dup[i];
+    return fpStateLabel(String(r[C.STATE - 1] || ''));
   });
-  sh.getRange(CFG.FIRST, C.CHECK, n, 1).setValues(out);
+}
+/** the CHECK column for the whole tab */
+function fpRecheck(sh) {
+  var n = fpRows(sh), v = sh.getRange(CFG.FIRST, 1, n, CFG.HEAD.length).getValues();
+  sh.getRange(CFG.FIRST, CFG.C.CHECK, n, 1).setValues(fpCheckLabels(v).map(function (l) { return [l]; }));
 }
 
 /* ======================= owner tools ======================= */
@@ -427,6 +480,7 @@ function fpProtectWhole(s) {
  * place); SL and BRAND → ROW STATE only warn, and the script fills them again.
  */
 function fpProtectEntry(s) {
+  fpEnsureLayout(s);
   s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) { p.remove(); });
   s.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
     if (/^Offer sheet/.test(p.getDescription())) p.remove();
@@ -635,9 +689,10 @@ function recheckActiveTab() {
   ui.alert('Checked ✓', refreshed + ' row(s) filled again from the database.', ui.ButtonSet.OK);
 }
 function fpRefillSheet(sh, ix) {
+  fpEnsureLayout(sh);
   var C = CFG.C, D = CFG.D, n = fpRows(sh);
   var v = sh.getRange(CFG.FIRST, 1, n, CFG.HEAD.length).getValues(), refreshed = 0;
-  var cd = [], ij = [], st = [];
+  var cn = [], cc = [], ij = [], st = [];
   v.forEach(function (r) {
     var bc = fpText(r[C.BC - 1]), state = String(r[C.STATE - 1] || '');
     var out = [r[C.NAME - 1], r[C.CAT - 1], r[C.BRAND - 1], r[C.PACK - 1], state];
@@ -645,9 +700,10 @@ function fpRefillSheet(sh, ix) {
       var h = fpFromIndex(ix, bc);
       if (h) { out = [h.vals[D.NAME - 1], h.vals[D.CAT - 1], h.vals[D.BRAND - 1], h.vals[D.PACK - 1], 'db']; refreshed++; }
     }
-    cd.push([out[0], out[1]]); ij.push([out[2], out[3]]); st.push([out[4]]);
+    cn.push([out[0]]); cc.push([out[1]]); ij.push([out[2], out[3]]); st.push([out[4]]);
   });
-  sh.getRange(CFG.FIRST, C.NAME, n, 2).setValues(cd);
+  sh.getRange(CFG.FIRST, C.NAME, n, 1).setValues(cn);
+  sh.getRange(CFG.FIRST, C.CAT, n, 1).setValues(cc);
   sh.getRange(CFG.FIRST, C.BRAND, n, 2).setValues(ij);
   sh.getRange(CFG.FIRST, C.STATE, n, 1).setValues(st);
   fpRecheck(sh);
