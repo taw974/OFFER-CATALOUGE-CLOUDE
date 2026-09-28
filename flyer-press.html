@@ -405,7 +405,6 @@ body.exporting .validbar{outline:none}
 /* a shaped box: the outline behind it draws the fill, the stroke and the shadow */
 .card.shaped{background:transparent !important;border:0 !important;box-shadow:none !important}
 .card.bare .crule{display:none}
-.page.cover .grid{position:relative}
 .zoneov{position:absolute;z-index:2;border:1.5px dashed rgba(47,125,255,.55);border-radius:6px;pointer-events:none;box-sizing:border-box}
 .zoneov .zl{position:absolute;left:0;top:-14px;font:700 9px/1 "Segoe UI",system-ui,sans-serif;color:#fff;background:rgba(47,125,255,.85);padding:2px 6px;border-radius:4px;white-space:nowrap}
 .zoneov.ed{pointer-events:auto;cursor:move;border-color:#2f7dff;background:rgba(47,125,255,.06);z-index:25}
@@ -586,7 +585,7 @@ body.exporting .page{box-shadow:none}
       <button class="blogo" id="brandLogo" title="Click to load your own logo">FP</button>
       <div class="btxt">
         <h1>Flyer Press Catalogue <span class="brnow" id="hdrBranch" title="The branch you are working on — click to jump to it"></span></h1>
-        <p class="by">LazyCreation | Habibok <span class="ver">v7.7</span></p>
+        <p class="by">LazyCreation | Habibok <span class="ver">v7.8</span></p>
       </div>
       <div class="ready empty" id="ready" title="How ready the whole flyer is — click for what is left">
         <svg viewBox="0 0 46 46" aria-hidden="true">
@@ -915,6 +914,13 @@ body.exporting .page{box-shadow:none}
       <summary><span class="lbl">Cover page</span> <span class="badge" id="bCover">off</span></summary>
       <div class="body">
         <label class="inline"><input type="checkbox" id="coverOn">Page 1 is a cover — products sit in zones over a background</label>
+        <div class="hint" style="margin-top:6px"><b>How to make a cover, step by step</b><br>
+        1. Tick the box above — page 1 becomes the cover and gets the Fresh-market zones.<br>
+        2. <b>Backgrounds</b>: upload your artwork (A4, 2480 × 3508 px) and click it.<br>
+        3. <b>Zones</b>: pick a ready-made layout, or change a zone — its departments (the chips), where it sits,
+        and how many columns × rows it takes. Tick <i>Move and size the zones with the mouse</i> to drag them on the page.<br>
+        4. Products go into the first zone that takes their department; what is left goes on to page 2.
+        Drag a product onto another zone's product to move it there.</div>
         <div class="hint">Fish on the right, fruit and vegetables in the middle, rice and oil on the shelf at the bottom — each zone
         takes the departments you give it, in the order of the sheet. What finds no zone goes to page 2 as usual.</div>
         <label class="h2">Backgrounds</label>
@@ -925,9 +931,11 @@ body.exporting .page{box-shadow:none}
         <label class="h2">Zones</label>
         <label class="inline"><input type="checkbox" id="coverEdit">Move and size the zones on the page with the mouse</label>
         <div id="zoneList"></div>
+        <label style="margin-top:8px">Ready-made layout</label>
+        <select id="zonePreset"></select>
         <div class="g2" style="margin-top:8px">
           <button class="ghost sm" id="btnZoneAdd">+ Add a zone</button>
-          <button class="ghost sm" id="btnZoneDef">Start again from the default layout</button>
+          <button class="ghost sm" id="btnZoneDef">Use this layout</button>
         </div>
         <div class="hint">Drag a product from one zone onto another to move it there. A zone with no department takes anything.
         Numbers are millimetres on the A4 page (210 × 297).</div>
@@ -1511,7 +1519,7 @@ var PDFJSZ={lib:"vL3tVuNIsgD4f5/CqPrSUiGM5U+QS+VLAdXFTBUwGLqmh6JpYaexpoTkK8lQtPH
 var __PRISTINE__ = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
 
 /* ================================ constants ================================ */
-var APP_VER="v7.7";
+var APP_VER="v7.8";
 var PH_NAME="NAME", PH_PRICE="00.00";
 
 var BRANCHES;
@@ -2974,6 +2982,11 @@ function autoFit(quiet){
   /* A silent give-up was what left new rows off the flyer.  Rather than do
      nothing, fall back to a squarer-than-ideal grid and say so. */
   if(!best) best=loose2||anyFit;
+  if(!best && np===1){
+    /* only a handful of products left (a page after the cover): a small grid of big boxes */
+    var c0=Math.max(2,Math.min(6,Math.ceil(Math.sqrt(n*0.75)))), r0=Math.max(1,Math.ceil(n/c0));
+    best={c:c0, r1:r0, r2:r0, sc:0, empty:c0*r0-n, cap:c0*r0, extra:0};
+  }
   if(!best){
     if(!quiet) alert(n+" products will not fit on "+np+" page(s) at a readable size.\nAdd another page and try again.");
     return;
@@ -4948,6 +4961,8 @@ function paintCover(){
       };
     });
   }
+  var zp=document.getElementById("zonePreset");
+  if(zp && !zp.options.length) zp.innerHTML=COVER_PRESETS.map(function(p){ return '<option value="'+p.k+'">'+escH(p.n)+'</option>'; }).join("");
   var zl=document.getElementById("zoneList"); if(!zl) return;
   var L=deptList();
   var h2="";
@@ -4968,6 +4983,7 @@ function paintCover(){
       '</div>'+
       '<div class="zb"><select data-k="namePos"><option value="top"'+(z.namePos!=="bottom"?" selected":"")+'>Name above the photo</option><option value="bottom"'+(z.namePos==="bottom"?" selected":"")+'>Name under the photo</option></select>'+
       '<select data-k="box"><option value="0"'+(!z.box?" selected":"")+'>No boxes — photos on the background</option><option value="1"'+(z.box?" selected":"")+'>Draw the boxes</option></select></div>'+
+      '<label class="inline" style="margin-top:6px"><input type="checkbox" data-k="auto"'+(z.auto!==false?" checked":"")+'>Fit — fewer products get bigger boxes (Columns × Rows is the most it takes)</label>'+
       '</div>';
   });
   zl.innerHTML=h2||'<div class="hint">No zones yet — press “Start again from the default layout”.</div>';
@@ -4980,6 +4996,7 @@ function paintCover(){
         if(k==="name") z.name=v;
         else if(k==="namePos") z.namePos=v;
         else if(k==="box") z.box=(v==="1");
+        else if(k==="auto") z.auto=!!inp.checked;
         else { var num=parseFloat(v); if(!isFinite(num)) return; if(k==="cols"||k==="rows") num=Math.max(1,Math.min(12,Math.round(num))); z[k]=num; }
       };
       inp.oninput=function(){ apply(); if(k!=="name") renderSoon(); };
@@ -5014,8 +5031,10 @@ document.getElementById("btnZoneAdd").onclick=function(){
   coverChanged();
 };
 document.getElementById("btnZoneDef").onclick=function(){
-  if(S.cover.zones.length && !confirm("Replace the zones with the default layout?")) return;
-  S.cover.zones=defaultZones(); S.products.forEach(function(p){ delete p.zone; });
+  var k=(document.getElementById("zonePreset")||{}).value||"market";
+  if(S.cover.zones.length && !confirm("Replace the zones with this layout?")) return;
+  S.cover.zones=presetZones(k); S.products.forEach(function(p){ delete p.zone; });
+  if(!S.cover.on){ S.cover.on=true; }
   coverChanged();
 };
 /* the zones on the page: drag to move, corners to size, drop a product on one */
@@ -5721,6 +5740,8 @@ function sendToZone(id, zid){
   coverChanged();
 }
 function coverChanged(){
+  /* the pages after the cover only hold what the zones did not take: cut their grid to fit */
+  try{ if(!S.pagesUser && S.mode==="data" && S.products.length) autoFit(true); }catch(e){}
   try{ ensureRoom(); }catch(e){}
   snap(); saveState(); paintCover(); render();
 }
@@ -6554,16 +6575,46 @@ function badgeFit(p, cw, ch, ibx, iby, ibw, ibh, org, tw, th){
 var COVERURL={};
 function defCover(){ return {on:false, bg:"", edit:false, zones:[]}; }
 function coverOn(){ return !!(S.cover && S.cover.on); }
-function defaultZones(){
-  var top=Math.round(297*(S.headerPct||30)/100)+(S.showValid?10:2);
-  var y0=Math.min(top,120), h1=297-y0;
-  return [
-    {id:"z"+Date.now().toString(36)+"a", name:"Fruit & vegetables", depts:["fresh"], x:4, y:y0, w:146, h:Math.round(h1*0.56), cols:5, rows:3, namePos:"top", box:false, ns:100, ps:100},
-    {id:"z"+Date.now().toString(36)+"b", name:"Fish",               depts:["fish"],  x:154, y:y0, w:52,  h:Math.round(h1*0.78), cols:1, rows:5, namePos:"top", box:false, ns:100, ps:100},
-    {id:"z"+Date.now().toString(36)+"c", name:"Chicken & meat",     depts:["chicken","meat"], x:4, y:y0+Math.round(h1*0.57), w:146, h:Math.round(h1*0.20), cols:5, rows:1, namePos:"top", box:false, ns:100, ps:100},
-    {id:"z"+Date.now().toString(36)+"d", name:"Rice, oil & grocery", depts:["rice","oil","grocery"], x:4, y:y0+Math.round(h1*0.78), w:202, h:297-4-(y0+Math.round(h1*0.78)), cols:7, rows:1, namePos:"bottom", box:false, ns:100, ps:100}
-  ];
+/* where the cover's zones may start: under the banner and the valid bar, if page 1 has them */
+function coverTop(){
+  var top=bannerOn(0) ? Math.round(297*(S.headerPct||30)/100)+(bnrGap(0)||0) : (S.margin||4);
+  if(S.showValid) top+=parseFloat(S.validSz||"11pt")*0.3528+4.6+2.5;
+  return Math.min(Math.round(top+2), 200);
 }
+function zoneMk(tag,name,depts,x,y,w,h,cols,rows,namePos){
+  return {id:"z"+Date.now().toString(36)+tag, name:name, depts:depts, x:x, y:y, w:w, h:h, cols:cols, rows:rows,
+          namePos:namePos||"top", box:false, ns:100, ps:100, auto:true};
+}
+/* ready-made cover layouts: every one fills the page under the banner */
+var COVER_PRESETS=[
+  {k:"market",  n:"Fresh market — fruit, fish on the right, meat, grocery shelf"},
+  {k:"halves",  n:"Two halves — fresh on the left, everything else on the right"},
+  {k:"hero",    n:"Hero — one big product on top, a grid under it"},
+  {k:"quarters",n:"Four quarters — fresh, fish, meat & chicken, grocery"},
+  {k:"grid",    n:"One big grid — any product, over the background"}
+];
+function presetZones(k){
+  var y0=coverTop(), B=297-4, h1=B-y0, W=202, X=4, g=4;
+  if(k==="halves") return [
+    zoneMk("a","Fresh",["fresh","fish","chicken","meat"], X,y0, (W-g)/2,h1, 3,5),
+    zoneMk("b","Grocery & more",[], X+(W+g)/2,y0, (W-g)/2,h1, 3,5)];
+  if(k==="hero") return [
+    zoneMk("a","Hero",[], X,y0, W,Math.round(h1*0.42), 1,1),
+    zoneMk("b","More offers",[], X,y0+Math.round(h1*0.42)+g, W,h1-Math.round(h1*0.42)-g, 5,3)];
+  if(k==="quarters"){ var hw=(W-g)/2, hh=(h1-g)/2; return [
+    zoneMk("a","Fruit & vegetables",["fresh"], X,y0, hw,hh, 3,2),
+    zoneMk("b","Fish",["fish"], X+hw+g,y0, hw,hh, 3,2),
+    zoneMk("c","Chicken & meat",["chicken","meat"], X,y0+hh+g, hw,hh, 3,2),
+    zoneMk("d","Grocery",["rice","oil","grocery"], X+hw+g,y0+hh+g, hw,hh, 3,2)]; }
+  if(k==="grid") return [zoneMk("a","Offers",[], X,y0, W,h1, 5,4)];
+  /* market: fruit and vegetables big on the left, fish down the right, meat, then the grocery shelf */
+  return [
+    zoneMk("a","Fruit & vegetables",["fresh"], X,y0, 146,Math.round(h1*0.56), 5,3),
+    zoneMk("b","Fish",["fish"], 154,y0, 52,Math.round(h1*0.78), 1,5),
+    zoneMk("c","Chicken & meat",["chicken","meat"], X,y0+Math.round(h1*0.57), 146,Math.round(h1*0.20), 5,1),
+    zoneMk("d","Rice, oil & grocery",["rice","oil","grocery"], X,y0+Math.round(h1*0.78), W,B-(y0+Math.round(h1*0.78)), 7,1,"bottom")];
+}
+function defaultZones(){ return presetZones("market"); }
 function zoneAccepts(z,p){
   if(p.zone!==undefined && p.zone!==null && p.zone!==""){ return p.zone===z.id; }
   if(!z.depts || !z.depts.length) return true;
@@ -6672,8 +6723,9 @@ function computeLayout(){
     var cards=[], heads=[];
     /* a shaped box: its contents are laid out in the shape's inner area,
        and the outline is drawn over the whole slot */
+    var ZBARE=false;                      /* a cover zone without boxes: no shape either */
     var mkCard=function(p,x,y,cw,ch,ri){
-      var sk=boxShapeOf(p), n0=cards.length;
+      var sk=ZBARE?"rect":boxShapeOf(p), n0=cards.length;
       if(sk==="rect"){ mkCard0(p,x,y,cw,ch,ri); return; }
       if(sk==="none"){ mkCard0(p,x,y,cw,ch,ri); if(cards.length>n0) cards[cards.length-1].bare=true; return; }
       var I=shapeInset(sk,cw,ch);
@@ -6860,6 +6912,17 @@ function computeLayout(){
       S.cover.zones.forEach(function(z,zi){
         var list=CA.byZone[zi], zc=Math.max(1,z.cols|0), zr=Math.max(1,z.rows|0);
         var zw=Math.max(10,+z.w||10), zh=Math.max(10,+z.h||10), zx=+z.x||0, zy=+z.y||0;
+        /* Fit: fewer products than the zone holds get bigger boxes that fill the zone */
+        if(z.auto!==false && list.length && list.length<zc*zr){
+          var nz=list.length, bestZ=null;
+          for(var cz=1;cz<=nz;cz++){
+            var rz=Math.ceil(nz/cz), wz=(zw-G*(cz-1))/cz, hz=(zh-G*(rz-1))/rz;
+            if(wz<8||hz<8) continue;
+            var scz=(cz*rz-nz)*2+Math.abs(Math.log((wz/hz)/0.8))*3;
+            if(!bestZ||scz<bestZ.s) bestZ={c:cz,r:rz,s:scz};
+          }
+          if(bestZ){ zc=bestZ.c; zr=bestZ.r; }
+        }
         var cwz=(zw-G*(zc-1))/zc, chz=(zh-G*(zr-1))/zr;
         zonesOut.push({id:z.id, name:z.name, x:zx, y:zy, w:zw, h:zh, cols:zc, rows:zr, n:list.length, box:!!z.box});
         if(!list.length) return;
@@ -6881,7 +6944,12 @@ function computeLayout(){
         list.forEach(function(cell,k){
           var col0=k%zc, row0=Math.floor(k/zc);
           var before=cards.length;
-          mkCard(cell.p, zx+col0*(cwz+G), zy+row0*(chz+G), cwz, chz, row0);
+          /* a part last row is centred in the zone */
+          var inRow=(row0===Math.floor((list.length-1)/zc))?(list.length-row0*zc):zc;
+          var xoff=(inRow<zc)?(zc-inRow)*(cwz+G)/2:0;
+          ZBARE=!z.box;
+          mkCard(cell.p, zx+xoff+col0*(cwz+G), zy+row0*(chz+G), cwz, chz, row0);
+          ZBARE=false;
           if(cards.length>before){ var cc=cards[cards.length-1]; cc.zone=z.id; cc.bare=!z.box; }
         });
       });
