@@ -580,7 +580,7 @@ body.exporting .page{box-shadow:none}
         <h1>Flyer Press Catalogue <span class="brnow" id="hdrBranch" title="The branch you are working on — click to jump to it"></span></h1>
         <p class="by">LazyCreation | Habibok <span class="ver">v7.7</span></p>
       </div>
-      <div class="ready empty" id="ready" title="How many product boxes carry a photograph you can trust">
+      <div class="ready empty" id="ready" title="How ready the whole flyer is — click for what is left">
         <svg viewBox="0 0 46 46" aria-hidden="true">
           <circle class="trk"   cx="23" cy="23" r="18"></circle>
           <circle class="arcck"  cx="23" cy="23" r="18" id="rdyArcCk"  stroke-dasharray="0 113.1"></circle>
@@ -3230,13 +3230,82 @@ function photoTally(){
   var tot=ok+ck+bad+ms;
   return {ok:ok, ck:ck, bad:bad, ms:ms, tot:tot, pct: tot? Math.round(ok*100/tot) : 0};
 }
+/* how ready the WHOLE flyer is, live: the header banner, the offer-valid bar,
+   the cover, and every box on every page — its name, its price, its photo —
+   plus the boxes that are still empty and the products that found no box.
+   Each part has a weight; the ring shows green for done, amber for "done but
+   nobody has checked it", red for wrong, and the grey track for missing.   */
+function flyerTally(){
+  var col=BRANCHES[S.branch].priceCol, notes=[];
+  var sec={ok:0, ck:0, bad:0, miss:0}, W=0;
+  var part=function(w, ok, ck, bad){          /* fractions of this part */
+    ok=ok||0; ck=ck||0; bad=bad||0;
+    W+=w; sec.ok+=w*ok; sec.ck+=w*ck; sec.bad+=w*bad; sec.miss+=w*Math.max(0,1-ok-ck-bad);
+  };
+  /* the header banner, if any page shows one */
+  var bnWanted=false; for(var i=0;i<S.pages.length;i++) if(bannerOn(i)) bnWanted=true;
+  if(bnWanted){
+    if(BANNERS[S.branch]) part(8,1); else { part(8,0); notes.push("No header banner uploaded"); }
+  }
+  /* the offer-valid bar */
+  if(S.showValid){
+    var vt=String((BRANCHES[S.branch]||{}).valid||"").trim();
+    if(vt) part(4,1); else { part(4,0); notes.push("The offer-valid bar has no text"); }
+  }
+  /* the cover: a background and something in every zone */
+  if(coverOn()){
+    var Z=(S.cover&&S.cover.zones)||[], filled=0;
+    try{ var CA=coverAssign(currentCells()); Z.forEach(function(z,zi){ if(CA.byZone && CA.byZone[zi] && CA.byZone[zi].length) filled++; }); }catch(e){}
+    var cb=S.cover.bg?1:0;
+    if(!cb) notes.push("The cover page has no background");
+    if(Z.length && filled<Z.length) notes.push((Z.length-filled)+" cover zone(s) are empty");
+    part(6, (cb*0.5)+(Z.length?0.5*filled/Z.length:0.5));
+  }
+  /* the boxes */
+  var list=(S.mode==="data")?currentList():[];
+  var cells=currentCells(), cap=capAll();
+  var used=cells.length, over=Math.max(0,used-cap);
+  /* a part row only leaves a hole on "Strict grid" and "Centre"; Spread and Widen close it */
+  var fm=S.fillMode||"even", empty=(fm==="grid"||fm==="center")?Math.max(0,cap-used):0;
+  var bx={ok:0, ck:0, bad:0, miss:0}, nBox=0, noName=0, noPrice=0, noPhoto=0, wrong=0, unchecked=0, gone=0, holes=0;
+  cells.forEach(function(c){
+    if(!c.p) return;                                   /* heading bands and chosen gaps are not boxes */
+    var p=c.p; nBox++;
+    if(p.name===PH_NAME || S.mode!=="data"){ holes++; bx.miss+=1; return; }   /* a reserved or blank box */
+    if(p.__gone){ gone++; bx.bad+=1; return; }
+    var nm=String(p.name||"").trim(), pr=String((p.prices||{})[col]||"").trim();
+    if(nm && nm!=="NEW PRODUCT" && !PLACEHOLDER.test(nm)) bx.ok+=0.2; else { bx.miss+=0.2; noName++; }
+    if(pr && pr!==PH_PRICE) bx.ok+=0.3; else { bx.miss+=0.3; noPrice++; }
+    var st=photoState(p);
+    if(st==="ok"||st==="skip") bx.ok+=0.5;
+    else if(st==="ck"){ bx.ck+=0.5; unchecked++; }
+    else if(st==="bad"){ bx.bad+=0.5; wrong++; }
+    else { bx.miss+=0.5; noPhoto++; }
+  });
+  var nAll=nBox+empty+over;
+  bx.miss+=empty+over;
+  if(nAll){
+    W+=80; ["ok","ck","bad","miss"].forEach(function(k){ sec[k]+=80*bx[k]/nAll; });
+  }
+  if(noPhoto) notes.push(noPhoto+" box(es) without a photo");
+  if(wrong) notes.push(wrong+" photo(s) look wrong");
+  if(unchecked) notes.push(unchecked+" photo(s) not checked yet");
+  if(noPrice) notes.push(noPrice+" box(es) without a price");
+  if(noName) notes.push(noName+" box(es) without a real name");
+  if(holes) notes.push(holes+" reserved box(es) still blank");
+  if(empty) notes.push(empty+" empty box(es) on the pages");
+  if(over) notes.push(over+" product(s) have no box — add a page");
+  if(gone) notes.push(gone+" box(es) marked NOT IN SHEET");
+  var pct=W? Math.floor(100*sec.ok/W+1e-9) : 0;
+  return {W:W, ok:sec.ok, ck:sec.ck, bad:sec.bad, miss:sec.miss, pct:pct, notes:notes, boxes:nBox, list:list.length};
+}
 var RDY_C=2*Math.PI*18;                       /* the ring is r=18 */
 function paintReady(){
   var box=document.getElementById("ready"); if(!box) return;
-  var t=photoTally();
-  var okLen=t.tot? RDY_C*t.ok/t.tot : 0;
-  var bdLen=t.tot? RDY_C*t.bad/t.tot : 0;
-  var ckLen=t.tot? RDY_C*t.ck/t.tot : 0;
+  var t=flyerTally();
+  var okLen=t.W? RDY_C*t.ok/t.W : 0;
+  var bdLen=t.W? RDY_C*t.bad/t.W : 0;
+  var ckLen=t.W? RDY_C*t.ck/t.W : 0;
   var aOk=document.getElementById("rdyArcOk"),
       aCk=document.getElementById("rdyArcCk"),
       aBd=document.getElementById("rdyArcBad");
@@ -3249,18 +3318,24 @@ function paintReady(){
   aCk.setAttribute("stroke-dasharray", n2(ckLen)+" "+n2(RDY_C));
   aCk.setAttribute("stroke-dashoffset", n2(-(okLen+bdLen)));
   aCk.style.visibility = ckLen>0.5 ? "" : "hidden";
-  document.getElementById("rdyPct").textContent = t.tot ? (t.pct+"%") : "—";
-  box.classList.toggle("done", t.tot>0 && t.pct===100);
-  box.classList.toggle("empty", !t.tot);
-  box.title = !t.tot
-    ? "No products on the flyer yet."
+  var none=!t.W || S.mode!=="data" || !t.list;      /* a blank template is not a flyer yet */
+  document.getElementById("rdyPct").textContent = none ? "—" : (t.pct+"%");
+  box.classList.toggle("done", !none && t.pct===100);
+  box.classList.toggle("empty", none);
+  box.title = none
+    ? "Nothing on the flyer yet."
     : (t.pct===100
-        ? ("100% — every photograph has been vouched for.\n"+t.ok+" checked.  Ready to print.")
-        : (t.pct+"% ready\n"+t.ok+" checked"+
-           (t.bad?("  ·  "+t.bad+" look wrong"):"")+
-           (t.ck?("  ·  "+t.ck+" unchecked"):"")+
-           (t.ms?("  ·  "+t.ms+" with no photo"):"")));
+        ? "100% — header, valid bar, every box: name, price and a checked photo. Ready to print."
+        : (t.pct+"% of the whole flyer is ready — click for the list.\n• "+t.notes.join("\n• ")));
+  READY_NOTES=t;
 }
+var READY_NOTES=null;
+document.getElementById("ready").style.cursor="pointer";
+document.getElementById("ready").addEventListener("click",function(){
+  var t=READY_NOTES; if(!t) return;
+  toast(t.pct===100 ? "The flyer is 100% ready."
+    : ("Flyer "+t.pct+"% ready — still to do:\n• "+t.notes.slice(0,8).join("\n• ")), 0);
+});
 function deptMatchMode(p){
   var L=deptList(), k=p&&p.dept;
   for(var i=0;i<L.length;i++) if(L[i].k===k) return L[i].m||"same";
