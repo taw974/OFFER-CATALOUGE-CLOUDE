@@ -1,5 +1,5 @@
 /**
- * OFFER ENTRY — the master sheet behind the flyer            (version 2)
+ * OFFER ENTRY — the master sheet behind the flyer            (version 2.2)
  * ------------------------------------------------------------------------
  * This file is the MASTER: it holds the DATABASE and runs everything.
  * Branch sheets are separate files made from here (Offer Tools → Create a
@@ -11,12 +11,17 @@
  * a copy has no trigger. Use Create a branch sheet instead.
  *
  * Set up once (the owner of the file): menu  Offer Tools → 1. Set up
+ *
+ * 2.2: rows can be inserted and deleted in the offer tabs (also in branch
+ * sheets). Only the heading row is locked; SL and BRAND → ROW STATE show a
+ * warning when typed in. After pasting this version, run 1. Set up again once —
+ * it unlocks the branch sheets that already exist.
  */
 
 var CFG = {
   HEAD: ['SL','BARCODE','PRODUCT NAME','CATEGORY','C.P','S.P','OFFER PRICE','NOTE','BRAND','PACKING','CHECK','ROW STATE'],
   C: {SL:1, BC:2, NAME:3, CAT:4, CP:5, SP:6, OFFER:7, NOTE:8, BRAND:9, PACK:10, CHECK:11, STATE:12},
-  FIRST: 2, ROWS: 500,
+  FIRST: 2, ROWS: 500,                 /* ROWS: the rows a new tab starts with; the tab may grow or shrink */
   DB: 'DATABASE', MAP: 'CATEGORY MAP', LOG: 'UPDATES', GUIDE: 'GUIDE', BR: 'BRANCH SHEETS',
   BRH: ['BRANCH', 'LINK', 'SPREADSHEET ID', 'CREATED'],
   DBH: ['BARCODE','KEY','PRODUCT NAME','BRAND','ITEM CODE','PACKING','UNIT','FAMILY','GROUP','CATEGORY','NAME SET BY','CATEGORY SET BY','SOURCE','UPDATED'],
@@ -58,15 +63,19 @@ function fpBranchList() {
     .filter(function (r) { return String(r[2] || '').trim(); })
     .map(function (r) { return {name: String(r[0]), link: String(r[1]), id: String(r[2]).trim()}; });
 }
-function fpHasTriggerFor(id) {
+function fpHasTriggerFor(id, fn) {
+  fn = fn || 'handleEdit';
   return ScriptApp.getProjectTriggers().some(function (t) {
-    return t.getHandlerFunction() === 'handleEdit' && String(t.getTriggerSourceId && t.getTriggerSourceId()) === String(id);
+    return t.getHandlerFunction() === fn && String(t.getTriggerSourceId && t.getTriggerSourceId()) === String(id);
   });
 }
+/** handleEdit for typing, handleChange for rows inserted or deleted */
 function fpEnsureTrigger(ssOrId) {
   var id = typeof ssOrId === 'string' ? ssOrId : ssOrId.getId();
-  if (!fpHasTriggerFor(id)) ScriptApp.newTrigger('handleEdit').forSpreadsheet(id).onEdit().create();
+  if (!fpHasTriggerFor(id, 'handleEdit')) ScriptApp.newTrigger('handleEdit').forSpreadsheet(id).onEdit().create();
+  if (!fpHasTriggerFor(id, 'handleChange')) ScriptApp.newTrigger('handleChange').forSpreadsheet(id).onChange().create();
 }
+function fpIsLinked(id) { return fpHasTriggerFor(id, 'handleEdit') && fpHasTriggerFor(id, 'handleChange'); }
 function fpEnsureBranchTab(ss) {
   var br = ss.getSheetByName(CFG.BR);
   if (!br) {
@@ -252,6 +261,19 @@ function fpIsEntry(sh) {
   var h = sh.getRange(1, 1, 1, 3).getValues()[0];
   return String(h[0]).trim() === 'SL' && String(h[1]).trim() === 'BARCODE' && String(h[2]).trim() === 'PRODUCT NAME';
 }
+/** the entry rows of a tab: from row 2 to its last row (rows may have been inserted or deleted) */
+function fpRows(sh) { return Math.max(1, sh.getMaxRows() - CFG.FIRST + 1); }
+function fpSlFormula(r) { return '=IF(COUNTA(B' + r + ':C)=0,"",ROW()-1)'; }
+/** after rows were inserted or deleted: SL numbers, the barcode format and the CATEGORY list on every row */
+function fpFixRows(sh) {
+  var n = fpRows(sh), C = CFG.C, f = [];
+  for (var i = 0; i < n; i++) f.push([fpSlFormula(CFG.FIRST + i)]);
+  sh.getRange(CFG.FIRST, C.SL, n, 1).setFormulas(f);
+  sh.getRange(CFG.FIRST, C.BC, n, 1).setNumberFormat('@');
+  var cats = sh.getRange(CFG.FIRST, C.CAT, n, 1).getDataValidations(), dv = null;
+  for (var j = 0; j < n && !dv; j++) dv = cats[j][0];
+  if (dv) sh.getRange(CFG.FIRST, C.CAT, n, 1).setDataValidation(dv);
+}
 function fpNewDbRow(bc, name, cat, today) {
   return [bc, fpKey(bc), name, '', '', '', '', '', '', cat || '', 'hand', cat ? 'hand' : '', 'added in sheet', today];
 }
@@ -268,10 +290,14 @@ function handleEdit(e) {
   var sh = e.range.getSheet();
   if (!fpIsEntry(sh)) return;
   var r0 = e.range.getRow(), nr = e.range.getNumRows(), c0 = e.range.getColumn(), nc = e.range.getNumColumns();
-  var first = Math.max(r0, CFG.FIRST), last = Math.min(r0 + nr - 1, CFG.FIRST + CFG.ROWS - 1);
+  var first = Math.max(r0, CFG.FIRST), last = Math.min(r0 + nr - 1, CFG.FIRST + fpRows(sh) - 1);
   if (last < first) return;
   var hit = function (c) { return c0 <= c && c <= c0 + nc - 1; };
   var C = CFG.C, D = CFG.D;
+  if (hit(C.SL)) {                                     /* SL was typed over or cleared: its formula back */
+    var slf = []; for (var q = first; q <= last; q++) slf.push([fpSlFormula(q)]);
+    sh.getRange(first, C.SL, slf.length, 1).setFormulas(slf);
+  }
   var bcHit = hit(C.BC), nameHit = hit(C.NAME), catHit = hit(C.CAT);
   var priceHit = hit(C.CP) || hit(C.SP) || hit(C.OFFER);
   if (!bcHit && !nameHit && !catHit && !priceHit) return;
@@ -346,16 +372,34 @@ function handleEdit(e) {
     lock.releaseLock();
   }
 }
+/* ================ the change trigger: a row inserted or deleted (runs as the owner) ================ */
+function handleChange(e) {
+  var t = e && e.changeType;
+  if (t !== 'INSERT_ROW' && t !== 'REMOVE_ROW') return;
+  var ss = (e && e.source) || SpreadsheetApp.getActive();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) return;
+  try {
+    ss.getSheets().forEach(function (sh) {
+      if (!fpIsEntry(sh)) return;
+      fpFixRows(sh);
+      if (t === 'INSERT_ROW') fpWarnRanges(sh);     /* rows added at the very bottom are covered as well */
+      fpRecheck(sh);
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
 /** the CHECK column for the whole tab: ⚠ for the same line twice, otherwise the row's state */
 function fpRecheck(sh) {
-  var C = CFG.C, v = sh.getRange(CFG.FIRST, 1, CFG.ROWS, CFG.HEAD.length).getValues();
+  var C = CFG.C, n = fpRows(sh), v = sh.getRange(CFG.FIRST, 1, n, CFG.HEAD.length).getValues();
   var dup = fpDuplicates(v.map(function (r) { return [r[C.BC - 1], r[C.NAME - 1], r[C.CAT - 1], r[C.CP - 1], r[C.SP - 1], r[C.OFFER - 1]]; }));
   var out = v.map(function (r, i) {
     if (!fpText(r[C.BC - 1]) && !String(r[C.NAME - 1] || '').trim()) return [''];
     if (dup[i]) return ['⚠ Same as SL ' + dup[i]];
     return [fpStateLabel(String(r[C.STATE - 1] || ''))];
   });
-  sh.getRange(CFG.FIRST, C.CHECK, CFG.ROWS, 1).setValues(out);
+  sh.getRange(CFG.FIRST, C.CHECK, n, 1).setValues(out);
 }
 
 /* ======================= owner tools ======================= */
@@ -376,13 +420,31 @@ function fpProtectWhole(s) {
   s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) { p.remove(); });
   fpOwnerOnly(s.protect().setDescription('Offer sheet — owner only'));
 }
+/**
+ * An offer tab. A whole-sheet lock stops everyone but the owner from inserting or
+ * deleting rows — even with BARCODE to NOTE left open, a new row also touches the
+ * locked columns. So only the heading row is locked (that also keeps the columns in
+ * place); SL and BRAND → ROW STATE only warn, and the script fills them again.
+ */
 function fpProtectEntry(s) {
   s.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) { p.remove(); });
-  var p = s.protect().setDescription('Offer sheet — only BARCODE to NOTE can be typed in');
-  p.setUnprotectedRanges([s.getRange(CFG.FIRST, CFG.C.BC, CFG.ROWS, CFG.C.NOTE - CFG.C.BC + 1)]);
-  fpOwnerOnly(p);
-  s.getRange(CFG.FIRST, CFG.C.BC, CFG.ROWS, 1).setNumberFormat('@');
+  s.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
+    if (/^Offer sheet/.test(p.getDescription())) p.remove();
+  });
+  fpOwnerOnly(s.getRange(1, 1, 1, s.getMaxColumns()).protect().setDescription('Offer sheet — the heading row'));
+  fpWarnRanges(s);
+  fpFixRows(s);
   s.hideColumns(CFG.C.STATE);
+}
+/** SL and BRAND → ROW STATE: filled by the script. Anyone may still insert or delete a row across them. */
+function fpWarnRanges(s) {
+  s.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) {
+    if (p.getDescription() === 'Offer sheet — filled by the script') p.remove();
+  });
+  var C = CFG.C, n = fpRows(s);
+  [s.getRange(CFG.FIRST, C.SL, n, 1), s.getRange(CFG.FIRST, C.BRAND, n, C.STATE - C.BRAND + 1)].forEach(function (r) {
+    r.protect().setDescription('Offer sheet — filled by the script').setWarningOnly(true);
+  });
 }
 function fpLog(ss, what, detail) {
   var lg = ss.getSheetByName(CFG.LOG); if (!lg) return;
@@ -398,7 +460,12 @@ function setup() {
   fpEnsureTrigger(ss);
   fpEnsureBranchTab(ss);
   var relinked = 0;
-  fpBranchList().forEach(function (b) { try { if (!fpHasTriggerFor(b.id)) { fpEnsureTrigger(b.id); relinked++; } } catch (err) {} });
+  fpBranchList().forEach(function (b) {
+    try {
+      if (!fpIsLinked(b.id)) { fpEnsureTrigger(b.id); relinked++; }
+      SpreadsheetApp.openById(b.id).getSheets().forEach(function (s) { if (fpIsEntry(s)) fpProtectEntry(s); });   /* rows can be inserted there too */
+    } catch (err) {}
+  });
   [CFG.DB, CFG.MAP, CFG.LOG, CFG.BR].forEach(function (nm) { var s = ss.getSheetByName(nm); if (s) { fpProtectWhole(s); s.hideSheet(); } });
   var g = ss.getSheetByName(CFG.GUIDE); if (g) fpProtectWhole(g);
   var tabs = 0; ss.getSheets().forEach(function (s) { if (fpIsEntry(s)) { fpProtectEntry(s); tabs++; } });
@@ -429,7 +496,7 @@ function createBranchSheet() {
   var offer = tmpl.copyTo(ns).setName('OFFER');
   var guide = ss.getSheetByName(CFG.GUIDE); if (guide) guide.copyTo(ns).setName(CFG.GUIDE);
   ns.getSheets().forEach(function (s) { if (s.getName() !== 'OFFER' && s.getName() !== CFG.GUIDE) ns.deleteSheet(s); });
-  offer.getRange(CFG.FIRST, CFG.C.BC, CFG.ROWS, CFG.HEAD.length - 1).clearContent();   /* a clean start, whatever the master held */
+  offer.getRange(CFG.FIRST, CFG.C.BC, fpRows(offer), CFG.HEAD.length - 1).clearContent();   /* a clean start, whatever the master held */
   fpProtectEntry(offer);
   var g2 = ns.getSheetByName(CFG.GUIDE); if (g2) fpProtectWhole(g2);
   fpEnsureTrigger(ns);
@@ -458,7 +525,7 @@ function showBranchSheets() {
   var list = fpBranchList(), ui = SpreadsheetApp.getUi();
   if (!list.length) { ui.alert('No branch sheets yet — Offer Tools → Create a branch sheet.'); return; }
   var html = '<div style="font:14px Arial,sans-serif;line-height:1.6">' + list.map(function (b) {
-    var ok = fpHasTriggerFor(b.id);
+    var ok = fpIsLinked(b.id);
     return '<p><b>' + b.name.replace(/</g, '&lt;') + '</b> ' + (ok ? '✓' : '⚠ not linked — run 1. Set up') +
       '<br><a href="' + b.link.replace(/"/g, '&quot;') + '" target="_blank">' + b.link.replace(/</g, '&lt;') + '</a></p>';
   }).join('') + '</div>';
@@ -554,7 +621,7 @@ function addBranchTab() {
   var name = String(r.getResponseText() || '').trim(); if (!name) return;
   if (ss.getSheetByName(name)) { ui.alert('A tab called “' + name + '” already exists.'); return; }
   var t = tmpl.copyTo(ss).setName(name);
-  t.getRange(CFG.FIRST, CFG.C.BC, CFG.ROWS, CFG.HEAD.length - 1).clearContent();
+  t.getRange(CFG.FIRST, CFG.C.BC, fpRows(t), CFG.HEAD.length - 1).clearContent();
   fpProtectEntry(t);
   t.activate();
   ui.alert('Tab “' + name + '” is ready ✓', 'Copy its link (with gid=) into the flyer app for that branch.', ui.ButtonSet.OK);
@@ -568,8 +635,8 @@ function recheckActiveTab() {
   ui.alert('Checked ✓', refreshed + ' row(s) filled again from the database.', ui.ButtonSet.OK);
 }
 function fpRefillSheet(sh, ix) {
-  var C = CFG.C, D = CFG.D;
-  var v = sh.getRange(CFG.FIRST, 1, CFG.ROWS, CFG.HEAD.length).getValues(), refreshed = 0;
+  var C = CFG.C, D = CFG.D, n = fpRows(sh);
+  var v = sh.getRange(CFG.FIRST, 1, n, CFG.HEAD.length).getValues(), refreshed = 0;
   var cd = [], ij = [], st = [];
   v.forEach(function (r) {
     var bc = fpText(r[C.BC - 1]), state = String(r[C.STATE - 1] || '');
@@ -580,9 +647,9 @@ function fpRefillSheet(sh, ix) {
     }
     cd.push([out[0], out[1]]); ij.push([out[2], out[3]]); st.push([out[4]]);
   });
-  sh.getRange(CFG.FIRST, C.NAME, CFG.ROWS, 2).setValues(cd);
-  sh.getRange(CFG.FIRST, C.BRAND, CFG.ROWS, 2).setValues(ij);
-  sh.getRange(CFG.FIRST, C.STATE, CFG.ROWS, 1).setValues(st);
+  sh.getRange(CFG.FIRST, C.NAME, n, 2).setValues(cd);
+  sh.getRange(CFG.FIRST, C.BRAND, n, 2).setValues(ij);
+  sh.getRange(CFG.FIRST, C.STATE, n, 1).setValues(st);
   fpRecheck(sh);
   return refreshed;
 }
