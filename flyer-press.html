@@ -2514,22 +2514,36 @@ function prodKey(p){
   if(p.slot>0) return "S:"+p.slot;
   return "N:"+n;
 }
+/* two prices that are the same number ("4.5" and "4.50") are the same price —
+   the two ways of reading a Google Sheet write numbers differently */
+function samePrice(a,b){
+  a=String(a||"").trim(); b=String(b||"").trim();
+  if(a===b) return true;
+  var num=/^-?\d+(\.\d+)?$/;
+  return num.test(a) && num.test(b) && parseFloat(a)===parseFloat(b);
+}
 function mergeInto(oldList, freshList, drop, mirror){
-  var byKey={}, byName={}, res=oldList.slice(), col=BRANCHES[S.branch].priceCol, detail=[];
+  /* every key keeps ALL its old products, in order: the same barcode twice in the
+     sheet is two boxes, and the n-th fresh row goes to the n-th old box */
+  var byKey={}, byName={}, res=oldList.slice(), oldLen=res.length, col=BRANCHES[S.branch].priceCol, detail=[];
   res.forEach(function(p,i){ if(p.__manual) return;
-    byKey[prodKey(p)]=i; var nk="N:"+String(p.name||"").toUpperCase().replace(/\s+/g," ").trim(); if(byName[nk]==null) byName[nk]=i; });
-  var seen={}, added=0, changed=0;
+    (byKey[prodKey(p)]=byKey[prodKey(p)]||[]).push(i);
+    var nk="N:"+String(p.name||"").toUpperCase().replace(/\s+/g," ").trim(); (byName[nk]=byName[nk]||[]).push(i); });
+  var used={}, added=0, changed=0;
+  var nextFree=function(L){ if(!L) return null; for(var q=0;q<L.length;q++) if(!used[L[q]]) return L[q]; return null; };
   freshList.forEach(function(np){
-    var k=prodKey(np); seen[k]=1;
-    var at=byKey[k];
+    var k=prodKey(np);
+    var at=nextFree(byKey[k]);
     if(at==null){
       /* the client started (or stopped) using barcodes: the same name is the same product */
       var nk="N:"+String(np.name||"").toUpperCase().replace(/\s+/g," ").trim();
-      if(np.name && np.name!==PH_NAME && byName[nk]!=null && !seen[prodKey(res[byName[nk]])]){
-        at=byName[nk]; seen[prodKey(res[at])]=1;
+      var an=(np.name && np.name!==PH_NAME) ? nextFree(byName[nk]) : null;
+      if(an!=null){
+        at=an;
         if(np.code && !res[at].code) res[at].code=np.code;     /* keep the new barcode from now on */
       }
     }
+    if(at!=null) used[at]=1;
     if(at==null){ res.push(np); added++; np.__chg={k:"new", t:Date.now()}; detail.push({k:"new", id:np.id, name:np.name}); return; }
     var op=res[at], touched=false, what=[];
     if(np.name && np.name!==op.name){ what.push({k:"name", from:op.name, to:np.name}); }
@@ -2544,7 +2558,7 @@ function mergeInto(oldList, freshList, drop, mirror){
       var nv=(np.prices[c]||"").trim();
       var ov=(op.prices[c]||"").trim();
       if(!nv && !(mirror && ov && c===col)) return;              /* a mirror clears the price the sheet cleared */
-      if(nv===ov) return;
+      if(samePrice(nv,ov)) return;
       op.prev=op.prev||{};
       if(ov && nv && !mp.prevCol) op.prev[c]=ov;                  /* no S.P column: the old price is the one before */
       if(c===col) what.push({k:"price", from:ov, to:nv||"—"});
@@ -2555,7 +2569,7 @@ function mergeInto(oldList, freshList, drop, mirror){
       var npv=np.prev||{}, opv=op.prev||{};
       PRICE_COLS.forEach(function(c){
         var a=(npv[c]||"").trim(), b=(opv[c]||"").trim();
-        if(a!==b){ op.prev=op.prev||{}; if(a) op.prev[c]=a; else delete op.prev[c]; touched=true;
+        if(!samePrice(a,b)){ op.prev=op.prev||{}; if(a) op.prev[c]=a; else delete op.prev[c]; touched=true;
           if(c===col) what.push({k:"old", from:b, to:a}); }
       });
     }
@@ -2571,12 +2585,12 @@ function mergeInto(oldList, freshList, drop, mirror){
   var removed=0;
   if(drop){
     /* a box you added on the flyer yourself is not the sheet's to take away */
-    var keep=res.filter(function(p){ var ok=seen[prodKey(p)]||p.__manual; if(!ok) detail.push({k:"removed", id:p.id, name:p.name}); return ok; });
+    var keep=res.filter(function(p,i){ var ok=i>=oldLen||used[i]||p.__manual; if(!ok) detail.push({k:"removed", id:p.id, name:p.name}); return ok; });
     removed=res.length-keep.length; res=keep;
   } else {
     /* still on the flyer, but no longer in the sheet: say so, do not delete */
-    res.forEach(function(p){
-      if(seen[prodKey(p)] || p.name===PH_NAME || p.__manual) return;
+    res.forEach(function(p,i){
+      if(i>=oldLen || used[i] || p.name===PH_NAME || p.__manual) return;
       if(!p.__gone){ p.__gone=true; p.__chg={k:"gone", t:Date.now()}; detail.push({k:"gone", id:p.id, name:p.name}); }
     });
   }
@@ -10281,8 +10295,12 @@ var GS_BUSY=false;
 async function gsLoad(quiet){
   if(!S.gs||!S.gs.csv){ toast("Paste the sheet link first.",1); return false; }
   if(GS_BUSY) return false; GS_BUSY=true;
+  var br0=S.branch, gs0=S.gs;
   try{
     var R=await gsRead();
+    /* the branch was switched (or another sheet linked) while Google was answering:
+       this sheet belongs to the branch it was asked for, not to the one open now */
+    if(S.branch!==br0 || S.gs!==gs0){ GS_BUSY=false; return false; }
     var h=R.hash; S.gs.via=R.via;
     if(quiet && S.gs.hash===h){ S.gs.last=Date.now(); paintGsState(); GS_BUSY=false; return true; }   /* nothing changed */
     var grid=R.grid;
@@ -10367,7 +10385,7 @@ function gsPreview(grid){
     if(!p){ sum.added.push(f.name); return; }
     if(f.name && f.name!==p.name) sum.renamed.push({from:p.name,to:f.name});
     var ov=String(p.prices[col]||"").trim(), nv=String(f.price||"").trim();
-    if(nv && nv!==ov) sum.price.push({name:f.name, from:ov, to:nv});
+    if(nv && !samePrice(nv,ov)) sum.price.push({name:f.name, from:ov, to:nv});
   });
   Object.keys(have).forEach(function(k){ if(!fresh[k] && !have[k].__gone && !have[k].__manual) sum.removed.push(have[k].name); });
   sum.total=sum.added.length+sum.removed.length+sum.price.length+sum.renamed.length;
