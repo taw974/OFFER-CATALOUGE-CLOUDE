@@ -1,5 +1,5 @@
 /**
- * OFFER ENTRY — the master sheet behind the flyer            (version 2.3)
+ * OFFER ENTRY — the master sheet behind the flyer            (version 2.4)
  * ------------------------------------------------------------------------
  * This file is the MASTER: it holds the DATABASE and runs everything.
  * Branch sheets are separate files made from here (Offer Tools → Create a
@@ -20,12 +20,16 @@
  * 2.3: CATEGORY comes after OFFER PRICE (1. Set up moves it in every tab; a tab
  * not moved yet moves itself on its first edit). A barcode fills faster: the tab
  * is read once, fewer writes, and branches no longer wait for each other.
+ *
+ * 2.4: columns are SL, PRODUCT NAME, BARCODE, C.P, S.P, OFFER PRICE, NOTE,
+ * CATEGORY, ... (1. Set up puts every tab in this order; any tab still in an
+ * older order is put right on its first edit). The DATABASE is kept in the
+ * script cache, so a scanned barcode no longer opens the master file.
  */
 
 var CFG = {
-  HEAD: ['SL','BARCODE','PRODUCT NAME','C.P','S.P','OFFER PRICE','CATEGORY','NOTE','BRAND','PACKING','CHECK','ROW STATE'],
-  C: {SL:1, BC:2, NAME:3, CP:4, SP:5, OFFER:6, CAT:7, NOTE:8, BRAND:9, PACK:10, CHECK:11, STATE:12},
-  OLD_TO_NEW: {4:7, 5:4, 6:5, 7:6},     /* before 2.3 CATEGORY was column D, in front of the prices */
+  HEAD: ['SL','PRODUCT NAME','BARCODE','C.P','S.P','OFFER PRICE','NOTE','CATEGORY','BRAND','PACKING','CHECK','ROW STATE'],
+  C: {SL:1, NAME:2, BC:3, CP:4, SP:5, OFFER:6, NOTE:7, CAT:8, BRAND:9, PACK:10, CHECK:11, STATE:12},
   FIRST: 2, ROWS: 500,                 /* ROWS: the rows a new tab starts with; the tab may grow or shrink */
   DB: 'DATABASE', MAP: 'CATEGORY MAP', LOG: 'UPDATES', GUIDE: 'GUIDE', BR: 'BRANCH SHEETS',
   BRH: ['BRANCH', 'LINK', 'SPREADSHEET ID', 'CREATED'],
@@ -48,6 +52,7 @@ function onOpen() {
     .addItem('Apply the CATEGORY MAP to the database again', 'reapplyCategories')
     .addSeparator()
     .addItem('Check this tab again', 'recheckActiveTab')
+    .addItem('Refresh the barcode cache', 'warmCacheMenu')
     .addToUi();
 }
 /* ======================= the master and its branch sheets ======================= */
@@ -263,19 +268,36 @@ function fpToday() { return Utilities.formatDate(new Date(), Session.getScriptTi
 function fpHeads(sh) {
   return sh.getRange(1, 1, 1, CFG.HEAD.length).getValues()[0].map(function (x) { return String(x).trim(); });
 }
+/** an offer tab: SL, then PRODUCT NAME and BARCODE (in either order — older tabs had BARCODE first) */
 function fpIsEntry(sh, heads) {
   if (!sh) return false;
   var nm = sh.getName();
   if (nm === CFG.DB || nm === CFG.MAP || nm === CFG.LOG || nm === CFG.GUIDE || nm === CFG.BR) return false;
   var h = heads || sh.getRange(1, 1, 1, 3).getValues()[0].map(function (x) { return String(x).trim(); });
-  return h[0] === 'SL' && h[1] === 'BARCODE' && h[2] === 'PRODUCT NAME';
+  return h[0] === 'SL' && ((h[1] === 'PRODUCT NAME' && h[2] === 'BARCODE') || (h[1] === 'BARCODE' && h[2] === 'PRODUCT NAME'));
 }
-/** the layout before 2.3: CATEGORY in D, OFFER PRICE in G */
-function fpOldLayout(heads) { return heads[3] === 'CATEGORY' && heads[6] === 'OFFER PRICE'; }
-/** CATEGORY moves behind OFFER PRICE — with its dropdown, colours and data. true if it was moved. */
+/** the tab has all the headings, but in an older order */
+function fpNeedsLayout(heads) {
+  var H = CFG.HEAD, cur = heads.slice(0, H.length);
+  if (cur.join('|') === H.join('|')) return false;
+  return H.every(function (x) { return cur.indexOf(x) >= 0; });
+}
+function fpColLetter(c) { var s = ''; while (c > 0) { var m = (c - 1) % 26; s = String.fromCharCode(65 + m) + s; c = (c - m - 1) / 26; } return s; }
+/** columns into the order of CFG.HEAD — with their data, dropdowns and colours. true if anything moved. */
 function fpEnsureLayout(sh) {
-  if (!fpOldLayout(fpHeads(sh))) return false;
-  sh.moveColumns(sh.getRange('D:D'), 8);
+  var heads = fpHeads(sh);
+  if (!fpNeedsLayout(heads)) return false;
+  var H = CFG.HEAD, cur = heads.slice(0, H.length);
+  var frozen = sh.getFrozenColumns();
+  if (frozen) sh.setFrozenColumns(0);                /* a column cannot be moved across the frozen edge */
+  for (var t = 0; t < H.length; t++) {
+    var p = cur.indexOf(H[t]);
+    if (p === t) continue;                           /* p > t: everything left of t is already in place */
+    var L = fpColLetter(p + 1);
+    sh.moveColumns(sh.getRange(L + ':' + L), t + 1);
+    cur.splice(p, 1); cur.splice(t, 0, H[t]);
+  }
+  if (frozen) sh.setFrozenColumns(frozen);
   return true;
 }
 /** the entry rows of a tab: from row 2 to its last row (rows may have been inserted or deleted) */
@@ -301,25 +323,138 @@ function fpAppendDb(db, rows) {
   db.getRange(start, 1, rows.length, CFG.DBH.length).setValues(rows);
 }
 
+/* ======================= the barcode cache (for speed) ======================= */
+/*
+ * Opening the master and searching its DATABASE is the slow part of a scan. So
+ * the DATABASE is also kept in Google's script cache, cut into buckets: a
+ * barcode typed in a branch sheet is found without opening the master at all.
+ * It is built again every 5 hours, after a PRODUCT MASTER update, after an edit
+ * in the DATABASE tab, and when a bucket has dropped out of the cache.
+ */
+var FP_TTL = 21600;
+function fpCacheVer() { return PropertiesService.getScriptProperties().getProperty('CACHE_V') || '0'; }
+function fpCacheReset() {
+  var p = PropertiesService.getScriptProperties();
+  p.setProperty('CACHE_V', String(Number(p.getProperty('CACHE_V') || 0) + 1));
+}
+function fpHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h; }
+function fpCacheKeys(bc) {
+  var b = fpText(bc).toUpperCase(), k = fpKey(bc).toUpperCase(), out = [];
+  if (b) out.push('B' + b);
+  if (k) out.push('K' + k);
+  return out;
+}
+/** the whole DATABASE into the cache; returns the buckets as well */
+function fpCacheBuild(db) {
+  var ix = fpLoadIndex(db), ent = {}, cnt = 0, D = CFG.D;
+  var put = function (key, hits) {
+    var h = fpPick(hits); if (!h) return;
+    ent[key] = [h.row, h.vals[D.NAME - 1], h.vals[D.BRAND - 1], h.vals[D.PACK - 1], h.vals[D.CAT - 1]]; cnt++;
+  };
+  Object.keys(ix.bc).forEach(function (b) { if (b) put('B' + b, ix.bc[b]); });
+  Object.keys(ix.key).forEach(function (k) { if (k) put('K' + k, ix.key[k]); });
+  var nb = Math.max(8, Math.ceil(cnt / 400)), buckets, ok = false;
+  while (!ok) {
+    buckets = {};
+    for (var i = 0; i < nb; i++) buckets[i] = {};
+    Object.keys(ent).forEach(function (key) { buckets[fpHash(key) % nb][key] = ent[key]; });
+    ok = Object.keys(buckets).every(function (i) { return JSON.stringify(buckets[i]).length < 95000; });
+    if (!ok) nb *= 2;
+  }
+  var fc = {v: fpCacheVer(), nb: nb, b: buckets};
+  try { fpCacheSave(fc, Object.keys(buckets)); } catch (err) {}
+  return fc;
+}
+function fpCacheSave(fc, ids) {
+  var cache = CacheService.getScriptCache(), pre = 'fp' + fc.v + ':', out = {};
+  ids.forEach(function (i) { out[pre + i] = JSON.stringify(fc.b[i]); });
+  out[pre + 'm'] = String(fc.nb);
+  var keys = Object.keys(out);
+  for (var s = 0; s < keys.length; s += 100) {
+    var part = {}; keys.slice(s, s + 100).forEach(function (k) { part[k] = out[k]; });
+    cache.putAll(part, FP_TTL);
+  }
+}
+/** the buckets these barcodes fall in, from the cache — null if the cache is not there (then build it) */
+function fpCacheLoad(bcs) {
+  try {
+    var cache = CacheService.getScriptCache(), v = fpCacheVer(), pre = 'fp' + v + ':';
+    var nb = Number(cache.get(pre + 'm') || 0);
+    if (!nb) return null;
+    var want = {};
+    bcs.forEach(function (bc) { fpCacheKeys(bc).forEach(function (k) { want[fpHash(k) % nb] = 1; }); });
+    var ids = Object.keys(want), got = cache.getAll(ids.map(function (i) { return pre + i; })), b = {};
+    for (var j = 0; j < ids.length; j++) {
+      var raw = got[pre + ids[j]];
+      if (!raw) return null;                         /* a bucket dropped out: build again */
+      b[ids[j]] = JSON.parse(raw);
+    }
+    return {v: v, nb: nb, b: b};
+  } catch (err) { return null; }
+}
+/** a hit in the same shape as fpFind: {row, vals} */
+function fpCacheFind(fc, bc) {
+  var keys = fpCacheKeys(bc), D = CFG.D;
+  for (var i = 0; i < keys.length; i++) {
+    var bk = fc.b[fpHash(keys[i]) % fc.nb], e = bk && bk[keys[i]];
+    if (!e) continue;
+    var vals = []; for (var c = 0; c < CFG.DBH.length; c++) vals.push('');
+    vals[D.BC - 1] = fpText(bc); vals[D.NAME - 1] = e[1]; vals[D.BRAND - 1] = e[2]; vals[D.PACK - 1] = e[3]; vals[D.CAT - 1] = e[4];
+    return {row: e[0], vals: vals};
+  }
+  return null;
+}
+/** after a write into the DATABASE: the same change in the cache (called inside the lock) */
+function fpCachePatch(changes) {             // changes: [{bc, row, name?, cat?, add?: [row, name, brand, pack, cat]}]
+  if (!changes.length) return;
+  var fc = fpCacheLoad(changes.map(function (c) { return c.bc; }));
+  if (!fc) return;                             /* not in the cache: it is built again from the DATABASE anyway */
+  var touched = {};
+  changes.forEach(function (c) {
+    fpCacheKeys(c.bc).forEach(function (key, idx) {
+      var id = fpHash(key) % fc.nb, bk = fc.b[id], e = bk[key];
+      if (c.add) { if (!e || idx === 0) { bk[key] = c.add.slice(); touched[id] = 1; } return; }
+      if (e && e[0] === c.row) {
+        if (c.name !== undefined) e[1] = c.name;
+        if (c.cat !== undefined) e[4] = c.cat;
+        touched[id] = 1;
+      }
+    });
+  });
+  var ids = Object.keys(touched);
+  if (ids.length) try { fpCacheSave(fc, ids); } catch (err) {}
+}
+/** time trigger + menu: build the cache again */
+function warmCache() {
+  var db = fpMaster().getSheetByName(CFG.DB);
+  if (!db) return;
+  fpCacheReset();
+  fpCacheBuild(db);
+}
+
 /* ======================= the edit trigger (runs as the owner) ======================= */
 function handleEdit(e) {
   if (!e || !e.range) return;
-  var sh = e.range.getSheet(), heads = fpHeads(sh);
+  var sh = e.range.getSheet();
+  if (sh.getName() === CFG.DB) { fpCacheReset(); return; }   /* the DATABASE was typed in by hand: cache out of date */
+  var C = CFG.C, D = CFG.D, H = CFG.HEAD;
+  var total = fpRows(sh);
+  var grid = sh.getRange(1, 1, total + 1, H.length).getValues();     /* the heading and the whole tab: one read */
+  var heads = grid[0].map(function (x) { return String(x).trim(); });
   if (!fpIsEntry(sh, heads)) return;
-  var C = CFG.C, D = CFG.D;
   var r0 = e.range.getRow(), nr = e.range.getNumRows(), c0 = e.range.getColumn(), nc = e.range.getNumColumns();
   var cols = {};
   for (var c = c0; c < c0 + nc; c++) cols[c] = 1;
-  if (fpOldLayout(heads)) {                            /* a tab from before 2.3: CATEGORY moves behind OFFER PRICE first */
+  if (fpNeedsLayout(heads)) {                          /* a tab in an older column order: put it in the new one first */
     var ml = LockService.getScriptLock();
     if (!ml.tryLock(25000)) return;
     try { fpEnsureLayout(sh); } finally { ml.releaseLock(); }
     var moved = {};
-    Object.keys(cols).forEach(function (k) { moved[CFG.OLD_TO_NEW[k] || k] = 1; });
+    Object.keys(cols).forEach(function (k) { var p = H.indexOf(heads[k - 1]); moved[p >= 0 ? p + 1 : k] = 1; });
     cols = moved;
+    grid = sh.getRange(1, 1, total + 1, H.length).getValues();
   }
   var hit = function (c) { return !!cols[c]; };
-  var total = fpRows(sh);
   var first = Math.max(r0, CFG.FIRST), last = Math.min(r0 + nr - 1, CFG.FIRST + total - 1);
   if (last < first) return;
   if (hit(C.SL)) {                                     /* SL was typed over or cleared: its formula back */
@@ -330,19 +465,30 @@ function handleEdit(e) {
   var priceHit = hit(C.CP) || hit(C.SP) || hit(C.OFFER);
   if (!bcHit && !nameHit && !catHit && !priceHit) return;
 
-  /* the master itself was edited: no need to open it again */
+  var all = grid.slice(1);
+  var n = last - first + 1, off = first - CFG.FIRST;
+  var today = fpToday();
+
+  /* the master is opened only when it is needed */
   var mid = '';
   try { mid = PropertiesService.getScriptProperties().getProperty('MASTER_ID') || ''; } catch (err) {}
   if (!FP_MASTER && e.source && (!mid || e.source.getId() === mid)) FP_MASTER = e.source;
-  var db = fpMaster().getSheetByName(CFG.DB), today = fpToday();
-  if (!db) return;
+  var db = null;
+  var dbGet = function () { if (!db) db = fpMaster().getSheetByName(CFG.DB); return db; };
 
-  /* the whole tab is read once; the database is only read here — no lock, so branches do not wait for each other */
-  var all = sh.getRange(CFG.FIRST, 1, total, CFG.HEAD.length).getValues();
-  var n = last - first + 1, off = first - CFG.FIRST;
-  var ix = (bcHit && n > CFG.BULK) ? fpLoadIndex(db) : null;
-  var find = function (bc) { return ix ? fpFromIndex(ix, bc) : fpFind(db, bc); };
-  var appendRows = [], dbSet = [];            // dbSet: {row, col, value}
+  /* the barcodes of these rows: from the cache; only if it is not there, from the DATABASE (and the cache is built) */
+  var fc = null;
+  if (bcHit || nameHit || catHit) {
+    var bcs = [];
+    for (var b = 0; b < n; b++) { var t = fpText(all[off + b][C.BC - 1]); if (t) bcs.push(t); }
+    if (bcs.length) {
+      fc = fpCacheLoad(bcs);
+      if (!fc) { if (!dbGet()) return; fc = fpCacheBuild(db); }
+    }
+  }
+  var find = function (bc) { return fc ? fpCacheFind(fc, bc) : null; };
+
+  var appendRows = [], dbSet = [];            // dbSet: {bc, row, col, value}
   for (var i = 0; i < n; i++) {
     var v = all[off + i];
     var bc = fpText(v[C.BC - 1]), name = String(v[C.NAME - 1] || '').trim(), cat = String(v[C.CAT - 1] || '').trim();
@@ -358,9 +504,9 @@ function handleEdit(e) {
         var h = find(bc);
         if (h) {
           var dv = h.vals;
-          if (typedName) { if (name.toUpperCase() !== String(dv[D.NAME - 1]).toUpperCase()) { dbSet.push({row: h.row, col: D.NAME, value: name}, {row: h.row, col: D.NAMEBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
+          if (typedName) { if (name.toUpperCase() !== String(dv[D.NAME - 1]).toUpperCase()) dbSet.push({bc: bc, row: h.row, col: D.NAME, value: name}); }
           else outName = dv[D.NAME - 1];
-          if (typedCat) { if (cat !== String(dv[D.CAT - 1])) { dbSet.push({row: h.row, col: D.CAT, value: cat}, {row: h.row, col: D.CATBY, value: 'hand'}, {row: h.row, col: D.UPD, value: today}); } }
+          if (typedCat) { if (cat !== String(dv[D.CAT - 1])) dbSet.push({bc: bc, row: h.row, col: D.CAT, value: cat}); }
           else outCat = dv[D.CAT - 1];
           outBrand = dv[D.BRAND - 1]; outPack = dv[D.PACK - 1]; outState = 'db';
         } else {
@@ -373,12 +519,12 @@ function handleEdit(e) {
       }
     } else if ((nameHit || catHit) && bc) {
       /* a hand change on a row that has a barcode: into the database */
-      var h2 = fpFind(db, bc);
+      var h2 = find(bc);
       if (h2) {
         if (nameHit && name && name.toUpperCase() !== String(h2.vals[D.NAME - 1]).toUpperCase())
-          dbSet.push({row: h2.row, col: D.NAME, value: name}, {row: h2.row, col: D.NAMEBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
+          dbSet.push({bc: bc, row: h2.row, col: D.NAME, value: name});
         if (catHit && cat && cat !== String(h2.vals[D.CAT - 1]))
-          dbSet.push({row: h2.row, col: D.CAT, value: cat}, {row: h2.row, col: D.CATBY, value: 'hand'}, {row: h2.row, col: D.UPD, value: today});
+          dbSet.push({bc: bc, row: h2.row, col: D.CAT, value: cat});
         outState = 'db';
       } else if (name) {
         var pending = appendRows.some(function (a) { return fpText(a[0]) === bc; });
@@ -399,23 +545,37 @@ function handleEdit(e) {
     if (labels[j] !== String(all[j][C.CHECK - 1] || '')) rest.push(j);
   }
   var block = all.slice(off, off + n);
-  if (bcHit) {
-    sh.getRange(first, C.NAME, n, 1).setValues(block.map(function (r) { return [r[C.NAME - 1]]; }));
-    sh.getRange(first, C.CAT, n, 1).setValues(block.map(function (r) { return [r[C.CAT - 1]]; }));
-  }
-  sh.getRange(first, C.BRAND, n, C.STATE - C.BRAND + 1).setValues(block.map(function (r, k) {
-    return [r[C.BRAND - 1], r[C.PACK - 1], labels[off + k], r[C.STATE - 1]];
+  if (bcHit) sh.getRange(first, C.NAME, n, 1).setValues(block.map(function (r) { return [r[C.NAME - 1]]; }));
+  /* CATEGORY, BRAND, PACKING, CHECK, ROW STATE sit side by side: one write */
+  sh.getRange(first, C.CAT, n, C.STATE - C.CAT + 1).setValues(block.map(function (r, k) {
+    return [r[C.CAT - 1], r[C.BRAND - 1], r[C.PACK - 1], labels[off + k], r[C.STATE - 1]];
   }));
   if (rest.length > 20) sh.getRange(CFG.FIRST, C.CHECK, total, 1).setValues(labels.map(function (l) { return [l]; }));
   else rest.forEach(function (k) { sh.getRange(CFG.FIRST + k, C.CHECK).setValue(labels[k]); });
 
-  /* only writing into the database waits for the other branches */
+  /* only writing into the database opens the master and waits for the other branches */
   if (!dbSet.length && !appendRows.length) return;
+  if (!dbGet()) return;
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(25000)) return;
   try {
-    dbSet.forEach(function (w) { db.getRange(w.row, w.col).setValue(w.value); });
-    fpAppendDb(db, appendRows.filter(function (a) { return !fpFind(db, fpText(a[0])); }));   /* another branch may have just added it */
+    var changes = [];
+    dbSet.forEach(function (w) {
+      var row = w.row;
+      if (fpText(db.getRange(row, D.BC).getValue()).toUpperCase() !== fpText(w.bc).toUpperCase()) {   /* the DATABASE moved since */
+        var f = fpFind(db, w.bc); if (!f) return; row = f.row;
+      }
+      var by = w.col === D.NAME ? D.NAMEBY : D.CATBY;
+      db.getRange(row, w.col).setValue(w.value);
+      db.getRange(row, by).setValue('hand');
+      db.getRange(row, D.UPD).setValue(today);
+      changes.push(w.col === D.NAME ? {bc: w.bc, row: row, name: w.value} : {bc: w.bc, row: row, cat: w.value});
+    });
+    var fresh = appendRows.filter(function (a) { return !fpFind(db, fpText(a[0])); });   /* another branch may have just added it */
+    var start = db.getLastRow() + 1;
+    fpAppendDb(db, fresh);
+    fresh.forEach(function (a, k) { changes.push({bc: a[0], add: [start + k, a[D.NAME - 1], '', '', a[D.CAT - 1]]}); });
+    fpCachePatch(changes);
   } finally {
     lock.releaseLock();
   }
@@ -512,6 +672,8 @@ function setup() {
   PropertiesService.getScriptProperties().setProperty('MASTER_ID', ss.getId());
   FP_MASTER = ss;
   fpEnsureTrigger(ss);
+  if (!ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'warmCache'; }))
+    ScriptApp.newTrigger('warmCache').timeBased().everyHours(5).create();   /* the cache lasts 6 hours at most */
   fpEnsureBranchTab(ss);
   var relinked = 0;
   fpBranchList().forEach(function (b) {
@@ -660,6 +822,7 @@ function updateFromMaster() {
               '   Kept (not in this master): ' + res.kept + (newGroups.length ? ('   New groups in the map: ' + newGroups.length) : '');
     fpLog(ss, 'Database updated from “' + src.getName() + '”', items.length + ' lines read. ' + msg);
     ss.deleteSheet(src);
+    fpCacheReset(); fpCacheBuild(db);
     ui.alert('Database updated ✓', msg + (newGroups.length ? '\n\nCheck the new groups at the bottom of CATEGORY MAP.' : '') +
       '\n\nEvery branch sheet uses the new database from now on. To refresh rows that were already scanned: Offer Tools → Fill every branch sheet again.', ui.ButtonSet.OK);
   } finally { lock.releaseLock(); }
@@ -710,6 +873,10 @@ function fpRefillSheet(sh, ix) {
   return refreshed;
 }
 
+function warmCacheMenu() {
+  warmCache();
+  SpreadsheetApp.getUi().alert('Done ✓', 'The barcode cache was built again from the DATABASE.', SpreadsheetApp.getUi().ButtonSet.OK);
+}
 function reapplyCategories() {
   var ss = SpreadsheetApp.getActive(), ui = SpreadsheetApp.getUi();
   if (!fpIsOwner()) { ui.alert('Only the owner of this file can do this.'); return; }
@@ -723,6 +890,7 @@ function reapplyCategories() {
     if (c && c !== v[i][0]) { v[i][0] = c; changed++; }
   }
   db.getRange(2, D.CAT, n, 1).setValues(v);
+  fpCacheReset(); fpCacheBuild(db);
   fpLog(ss, 'Category map applied', changed + ' product(s) moved to another category.');
   ui.alert('Done ✓', changed + ' product(s) moved to another category. Categories chosen by hand in the sheet were left alone.', ui.ButtonSet.OK);
 }
