@@ -2552,7 +2552,7 @@ function mergeInto(oldList, freshList, drop, mirror){
       /* a mirror also copies a value the sheet emptied — for the columns the sheet really has */
       var hasCol=(f==="category")?!!mp.category:(f==="ar")?!!mp.ar:(f==="image")?!!mp.image:true;
       var take=(np[f]!==undefined) && (np[f]!=="" || (mirror && hasCol && f!=="name"));
-      if(take && np[f]!==op[f]){ op[f]=np[f]; touched=true; if(f==="category"){ delete op.dept; } }
+      if(take && np[f]!==op[f]){ op[f]=np[f]; touched=true; if(f==="category" && !op.deptLock){ delete op.dept; } }
     });
     PRICE_COLS.forEach(function(c){
       var nv=(np.prices[c]||"").trim();
@@ -5430,8 +5430,10 @@ function moveProduct(fromId, toId, after){
   var to=-1; for(var j=0;j<L.length;j++) if(L[j].id===toId) to=j;
   if(to<0) to=L.length; else if(after) to++;
   L.splice(to,0,A);
-  if(S.slotMode==="dept" && A.category!==undefined){
-    var B2=findItem(toId); if(B2 && B2.category!==A.category){ A.category=B2.category; A.dept=B2.dept; }
+  if(S.slotMode==="dept"){
+    /* moved into another department by hand: it stays there, even when the sheet is read again */
+    var B2=findItem(toId), dA=A.dept||classifyDept(A), dB=B2&&(B2.dept||classifyDept(B2));
+    if(B2 && dB && dB!==dA){ A.dept=dB; A.deptLock=1; if(B2.category!==undefined) A.category=B2.category; }
   }
   if(coverOn()){
     var zb=coverZoneOf(toId); if(zb) A.zone=zb.id; else delete A.zone;      /* the box it landed by decides the zone */
