@@ -8282,7 +8282,9 @@ function refreshHexBoxes(){
 function paintGradPalette(){
   var box=document.getElementById("gpalWrap"); if(!box) return;
   if(box.getAttribute("data-painted")==="1") return;      /* painted once, never wiped */
-  var groups=[{n:"Classic — three stops", g:(typeof GPAL!=="undefined"?GPAL:[]).map(function(p){ return p.g; })}].concat(GRADS);
+  var groups=[{n:"Classic — three stops", g:(typeof GPAL!=="undefined"?GPAL:[]).map(function(p){ return p.g; })},
+              /* the two-colour borders from Single pages → Border & card, for the page too */
+              {n:"Border & card — two colours", g:(typeof SPAL!=="undefined"?SPAL:[]).map(function(p){ return [p.a,p.b]; })}].concat(GRADS);
   var h='<div class="gpal">';
   groups.forEach(function(G){
     if(!G.g.length) return;
