@@ -1119,7 +1119,7 @@ body.exporting .page{box-shadow:none}
         </select>
 </div>
 
-        <label class="h2">Extras</label>
+        <label class="h2">Category headings</label>
 <div id="blk_arabic">
         <label class="inline"><input type="checkbox" id="showAr">Print the Arabic name under the English one</label>
 </div>
@@ -1182,7 +1182,8 @@ body.exporting .page{box-shadow:none}
         </div>
 </div>
         <label class="inline"><input type="checkbox" id="catHeads">Put a heading band before each category</label>
-        <div class="hint">A heading uses one whole row, and it follows the order you chose under Product data.</div>
+        <div class="hint">A coloured band with the category name (GROCERY, FRESH FISH …) above each group of
+        products. A heading uses one whole row, and it follows the order you chose under Product data.</div>
         <div class="swatches">
           <div class="sw"><label>Heading fill</label><input type="color" id="c_headBg"></div>
           <div class="sw"><label>Heading text</label><input type="color" id="c_headT"></div>
@@ -1222,7 +1223,9 @@ body.exporting .page{box-shadow:none}
         <label>Move sideways — <span id="vxVal">0</span> mm</label>
         <input type="range" id="validX" min="-70" max="70" step="0.5" value="0">
 </div>
+        <label class="h2">Reset colours</label>
         <button class="ghost" id="btnThemeReset">Reset to branch colours</button>
+        <div class="hint">Puts every colour in Design back to this branch's own colours. Fonts, sizes and layout stay as they are.</div>
       </div>
     </details>
 
@@ -8106,6 +8109,7 @@ function syncPanel(){
   document.getElementById("vxVal").textContent=S.validX;
   paintGPal(); syncSingle(); paintSpBannerState(); paintShare();
   paintPageList();
+  refreshHexBoxes();                   /* again, now that every colour box holds this branch's colour */
 }
 
 document.getElementById("branchName").oninput=debounce(function(){
@@ -9701,7 +9705,8 @@ var FIND_SUBKEYS={
   "arabic name":"arabic",
   "page background":"background gradient colour color page",
   "product box":"box fill border colour",
-  "extras":"heading colours reset"
+  "category headings":"heading band category section title colours",
+  "reset colours":"reset colours colors default branch theme"
 };
 var FIND_SECKEYS={"Export":"pdf png jpg svg download print file", "Product data":"sheet excel csv link", "Product images":"photo image picture folder", "Cover page":"zone zones background first page"};
 function hiddenBoxOf(el){
