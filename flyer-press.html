@@ -300,6 +300,12 @@ body.exporting .qact,body.bare .qact,body.notools .qact{display:none !important}
 body.exporting .chgchip,body.bare .chgchip{display:none !important}
 #chgLog{margin-top:8px}
 .tplgal{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px}
+.shapegal{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}
+.shapegal .sp{border:2px solid var(--line);border-radius:9px;padding:5px 3px 3px;cursor:pointer;background:rgba(255,255,255,.03);text-align:center}
+.shapegal .sp:hover{border-color:rgba(255,255,255,.35)}
+.shapegal .sp.on{border-color:#39FF88;box-shadow:0 0 0 2px rgba(57,255,136,.25)}
+.shapegal .sp svg{width:100%;height:auto;display:block}
+.shapegal .sp i{display:block;font:600 10px/1.2 "Segoe UI",system-ui,sans-serif;font-style:normal;color:var(--ink2);margin-top:2px}
 .tplgal .tp{border:2px solid var(--line);border-radius:9px;padding:6px 6px 4px;cursor:pointer;background:rgba(255,255,255,.03);text-align:center}
 .tplgal .tp:hover{border-color:rgba(255,255,255,.35)}
 .tplgal .tp.on{border-color:var(--sc);background:color-mix(in srgb,var(--sc) 10%,transparent)}
@@ -396,6 +402,8 @@ body.exporting .validbar{outline:none}
 .card.dragging{opacity:.35}
 /* a product on the cover: no box, just the photo, the name and the tag */
 .card.bare{background:transparent !important;border:0 !important;box-shadow:none !important}
+/* a shaped box: the outline behind it draws the fill, the stroke and the shadow */
+.card.shaped{background:transparent !important;border:0 !important;box-shadow:none !important}
 .card.bare .crule{display:none}
 .page.cover .grid{position:relative}
 .zoneov{position:absolute;z-index:2;border:1.5px dashed rgba(47,125,255,.55);border-radius:6px;pointer-events:none;box-sizing:border-box}
@@ -1051,6 +1059,13 @@ body.exporting .page{box-shadow:none}
 
 <div id="blk_pbox">
         <label class="h2">Product box</label>
+
+        <label style="margin-top:8px;font-weight:650;color:var(--ink2)">Box shape</label>
+        <div class="shapegal" id="shapeGal"></div>
+        <div class="hint">Click a shape to use it on every box — the photo, the name and the price move inside it.
+        <b>No box</b> leaves only the photo, the name and the tag on the page. To give only some boxes a shape,
+        pick them first (<b>Shift+click</b> or <b>Space</b>), then click the shape.</div>
+        <button class="ghost sm" id="btnShapeClear" style="margin-top:6px">Picked boxes: back to the flyer's shape</button>
         
         <label style="margin-top:8px;font-weight:650;color:var(--ink2)">Box shadow</label>
         <select id="shBk">
@@ -4457,6 +4472,184 @@ function cardFillCss(){
   var c=hex2rgb(S.theme.cardBg);
   return "rgba("+c[0]+","+c[1]+","+c[2]+","+n2(a)+")";
 }
+/* ============================== box shapes ==============================
+   The product box can take a shape: a pill, an oval, a hexagon, a ticket…
+   Each shape is drawn from one outline (straight lines and curves in mm),
+   so the screen, the SVG and the PDF draw exactly the same thing.  Each
+   shape also keeps an inner area clear of its edges — the photo, the name
+   and the price are laid out inside that area, so nothing sticks out.   */
+var BOX_SHAPES=[
+  {k:"rect",   n:"Box"},
+  {k:"none",   n:"No box"},
+  {k:"soft",   n:"Soft"},
+  {k:"pill",   n:"Pill"},
+  {k:"ellipse",n:"Oval"},
+  {k:"hex",    n:"Hexagon"},
+  {k:"oct",    n:"Octagon"},
+  {k:"cut",    n:"Cut corners"},
+  {k:"ticket", n:"Ticket"},
+  {k:"stamp",  n:"Stamp"},
+  {k:"arch",   n:"Arch"},
+  {k:"shield", n:"Shield"},
+  {k:"slant",  n:"Slanted"},
+  {k:"leaf",   n:"Leaf"},
+  {k:"arrow",  n:"Arrow tag"},
+  {k:"bubble", n:"Speech bubble"}
+];
+function boxShapeOf(p){
+  var k=(p && p.shape) || (S.theme && S.theme.boxShape) || "rect";
+  for(var i=0;i<BOX_SHAPES.length;i++) if(BOX_SHAPES[i].k===k) return k;
+  return "rect";
+}
+/* the inner area, in mm from each edge */
+function shapeInset(k,w,h){
+  /* the corners of the inner area must sit inside the outline (the price tag and
+     the name live in those corners), so each inset is worked out from the curve */
+  var m=Math.min(w,h), e=0.35, I={l:e,t:e,r:e,b:e};
+  if(k==="soft"){ var R=m*0.22; I.l=I.r=I.t=I.b=R*0.3+e; }
+  else if(k==="pill"){ var r=m/2; I.l=I.r=I.t=I.b=r*0.3+e; }          /* the inner corners sit at 45° on the round ends */
+  else if(k==="ellipse"){ I.l=I.r=w*0.155; I.t=I.b=h*0.155; }
+  else if(k==="hex"){ var a=Math.min(w*0.2,h*0.3); I.l=I.r=a+e; }
+  else if(k==="oct"){ var c=m*0.2; I.l=I.r=I.t=I.b=c*0.5+e; }
+  else if(k==="cut"){ var c2=m*0.2; I.l=I.r=I.t=I.b=c2*0.5+e; }
+  else if(k==="ticket"){ var nr=m*0.08; I.l=I.r=nr*1.1+e; }
+  else if(k==="stamp"){ var sr=m*0.035; I.l=I.r=I.t=I.b=sr*2.4; }
+  else if(k==="arch"){ var aa=Math.min(w/2,h*0.3); I.t=aa*0.8+e; I.l=I.r=0.6; }
+  else if(k==="shield"){ I.b=h*0.2+e; I.l=I.r=0.6; }
+  else if(k==="slant"){ var s=Math.min(w*0.14,h*0.3); I.l=I.r=s+e; }
+  else if(k==="leaf"){ var R2=m*0.35; I.l=I.r=I.t=I.b=R2*0.3+e; }
+  else if(k==="arrow"){ var ar=Math.min(w*0.18,h*0.4); I.l=ar+e; }
+  else if(k==="bubble"){ var tl=Math.min(h*0.12,6), br=m*0.1; I.b=tl+br*0.3+e; I.l=I.r=I.t=br*0.3+e; }
+  return I;
+}
+var KAPPA=0.5523;
+/* a rounded rectangle with its own radius for each corner (tl, tr, br, bl) */
+function segRound(w,h,r){
+  var q=r.map(function(v){ return Math.max(0,Math.min(v, w/2, h/2)); }), k=KAPPA, S2=[];
+  S2.push(["M",q[0],0]); S2.push(["L",w-q[1],0]);
+  if(q[1]) S2.push(["C",w-q[1]+q[1]*k,0, w,q[1]-q[1]*k, w,q[1]]);
+  S2.push(["L",w,h-q[2]]);
+  if(q[2]) S2.push(["C",w,h-q[2]+q[2]*k, w-q[2]+q[2]*k,h, w-q[2],h]);
+  S2.push(["L",q[3],h]);
+  if(q[3]) S2.push(["C",q[3]-q[3]*k,h, 0,h-q[3]+q[3]*k, 0,h-q[3]]);
+  S2.push(["L",0,q[0]]);
+  if(q[0]) S2.push(["C",0,q[0]-q[0]*k, q[0]-q[0]*k,0, q[0],0]);
+  S2.push(["Z"]);
+  return S2;
+}
+function segPoly(pts){ var S2=pts.map(function(p,i){ return [i?"L":"M",p[0],p[1]]; }); S2.push(["Z"]); return S2; }
+/* half a circle from A to B, bulging to the given side (+1 = left of A→B) */
+function semiArc(ax,ay,bx,by,side){
+  var cx=(ax+bx)/2, cy=(ay+by)/2, r=Math.hypot(bx-ax,by-ay)/2;
+  var ux=(bx-ax)/(2*r), uy=(by-ay)/(2*r), nx=uy*side, ny=-ux*side, k=KAPPA;
+  var mx=cx+nx*r, my=cy+ny*r;                         /* the top of the bump */
+  return [["C", ax+nx*r*k, ay+ny*r*k, mx-ux*r*k, my-uy*r*k, mx, my],
+          ["C", mx+ux*r*k, my+uy*r*k, bx+nx*r*k, by+ny*r*k, bx, by]];
+}
+/* the outline of shape k in a w × h box, in mm from its top-left corner */
+function shapeSegs(k,w,h){
+  var m=Math.min(w,h), k2=KAPPA;
+  if(k==="soft")  return segRound(w,h,[m*0.22,m*0.22,m*0.22,m*0.22]);
+  if(k==="pill")  { var r=m/2; return segRound(w,h,[r,r,r,r]); }
+  if(k==="leaf")  { var R=m*0.35, s=m*0.04; return segRound(w,h,[R,s,R,s]); }
+  if(k==="ellipse"){
+    var rx=w/2, ry=h/2;
+    return [["M",rx,0],["C",rx+rx*k2,0, w,ry-ry*k2, w,ry],["C",w,ry+ry*k2, rx+rx*k2,h, rx,h],
+            ["C",rx-rx*k2,h, 0,ry+ry*k2, 0,ry],["C",0,ry-ry*k2, rx-rx*k2,0, rx,0],["Z"]];
+  }
+  if(k==="hex")  { var a=Math.min(w*0.2,h*0.3); return segPoly([[a,0],[w-a,0],[w,h/2],[w-a,h],[a,h],[0,h/2]]); }
+  if(k==="oct")  { var c=m*0.2; return segPoly([[c,0],[w-c,0],[w,c],[w,h-c],[w-c,h],[c,h],[0,h-c],[0,c]]); }
+  if(k==="cut")  { var c2=m*0.2; return segPoly([[c2,0],[w,0],[w,h-c2],[w-c2,h],[0,h],[0,c2]]); }
+  if(k==="slant"){ var sl=Math.min(w*0.14,h*0.3); return segPoly([[sl,0],[w,0],[w-sl,h],[0,h]]); }
+  if(k==="shield"){ var p=h*0.2; return segPoly([[0,0],[w,0],[w,h-p],[w/2,h],[0,h-p]]); }
+  if(k==="arrow"){ var ar=Math.min(w*0.18,h*0.4); return segPoly([[ar,0],[w,0],[w,h],[ar,h],[0,h/2]]); }
+  if(k==="arch"){
+    var aa=Math.min(w/2,h*0.3), hw=w/2;
+    return [["M",0,h],["L",0,aa],["C",0,aa-aa*k2, hw-hw*k2,0, hw,0],["C",hw+hw*k2,0, w,aa-aa*k2, w,aa],["L",w,h],["Z"]];
+  }
+  if(k==="ticket"){
+    var nr=m*0.08, S1=[["M",0,0],["L",w,0],["L",w,h/2-nr]];
+    S1=S1.concat(semiArc(w,h/2-nr, w,h/2+nr, -1));     /* a notch bitten out of the right edge */
+    S1.push(["L",w,h],["L",0,h],["L",0,h/2+nr]);
+    S1=S1.concat(semiArc(0,h/2+nr, 0,h/2-nr, -1));     /* and out of the left edge */
+    S1.push(["Z"]); return S1;
+  }
+  if(k==="bubble"){
+    var tl=Math.min(h*0.12,6), bh=h-tl, br=m*0.1, qq=Math.min(br,w/2,bh/2);
+    var B=segRound(w,bh,[qq,qq,qq,qq]);
+    /* cut in a tail on the bottom edge, left of centre */
+    var t0=w*0.18, t1=w*0.34, out=[];
+    B.forEach(function(sg){
+      if(sg[0]==="L" && sg[1]===qq && sg[2]===bh){           /* the bottom edge, drawn right to left */
+        out.push(["L",t1,bh],["L",w*0.14,h],["L",t0,bh]);
+      }
+      out.push(sg);
+    });
+    return out;
+  }
+  if(k==="stamp"){
+    var sr=m*0.035, x0=sr, y0=sr, x1=w-sr, y1=h-sr, S3=[["M",x0,y0]];
+    var edge=function(ax,ay,bx,by){
+      var L=Math.hypot(bx-ax,by-ay), n=Math.max(2,Math.ceil(L/(2*sr)));
+      for(var i=0;i<n;i++){
+        var fx=ax+(bx-ax)*i/n, fy=ay+(by-ay)*i/n, tx=ax+(bx-ax)*(i+1)/n, ty=ay+(by-ay)*(i+1)/n;
+        S3=S3.concat(semiArc(fx,fy,tx,ty,1));
+      }
+    };
+    edge(x0,y0,x1,y0); edge(x1,y0,x1,y1); edge(x1,y1,x0,y1); edge(x0,y1,x0,y0);
+    S3.push(["Z"]); return S3;
+  }
+  return segRound(w,h,[0,0,0,0]);
+}
+function segsSVG(S2,ox,oy){
+  return S2.map(function(sg){
+    if(sg[0]==="Z") return "Z";
+    var o=[sg[0]];
+    for(var i=1;i<sg.length;i+=2) o.push(n2(ox+sg[i])+" "+n2(oy+sg[i+1]));
+    return o.join(" ");
+  }).join(" ");
+}
+/* PDF: X and Y map mm to points (Y flips the page) */
+function segsPDF(S2,ox,oy,X,Y){
+  return S2.map(function(sg){
+    if(sg[0]==="Z") return "h";
+    var o=[];
+    for(var i=1;i<sg.length;i+=2) o.push(n2(X(ox+sg[i]))+" "+n2(Y(oy+sg[i+1])));
+    return o.join(" ")+" "+(sg[0]==="M"?"m":sg[0]==="L"?"l":"c");
+  }).join(" ");
+}
+/* the drop shadow of a shaped box, as a CSS filter on its outline */
+function shapeShadowCss(sh){
+  if(!shOn(sh)) return "";
+  var col=shRGBA(sh);
+  if(sh.k==="outline") return "drop-shadow(0 0 "+n2(Math.max(0.2,shNum(sh.size,0.5)))+"mm "+col+")";
+  if(sh.k==="glow")    return "drop-shadow(0 0 "+n2(shNum(sh.blur,2.6))+"mm "+col+")";
+  if(sh.k==="backdrop")return "drop-shadow("+n2(shNum(sh.dx,1.2))+"mm "+n2(shNum(sh.dy,1.2))+"mm 0 "+col+")";
+  return "drop-shadow("+n2(shNum(sh.dx,0))+"mm "+n2(shNum(sh.dy,0))+"mm "+n2(shNum(sh.blur,0))+"mm "+col+")";
+}
+/* the outline behind a shaped box on screen: an SVG as the box's first child */
+function shapeHTML(c){
+  var Sh=c.shape; if(!Sh) return "";
+  var t=S.theme, bw=(t.cardBw||0)/3.78, d=segsSVG(shapeSegs(Sh.k,Sh.w,Sh.h),0,0), f=shapeShadowCss(S.boxSh);
+  return '<svg class="shapesvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+n2(Sh.w)+' '+n2(Sh.h)+
+    '" style="position:absolute;left:'+n2(Sh.dx)+'mm;top:'+n2(Sh.dy)+'mm;width:'+n2(Sh.w)+'mm;height:'+n2(Sh.h)+
+    'mm;overflow:visible;pointer-events:none;z-index:0'+(f?(';filter:'+f):'')+'"><path d="'+d+'" fill="'+t.cardBg+'"'+
+    (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
+    (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/></svg>';
+}
+/* a little sample for the shape picker: the box, a photo, a name and a price tag */
+function shapeThumb(k){
+  var w=56, h=70, t=S.theme, I=shapeInset(k,w,h), iw=w-I.l-I.r, ih=h-I.t-I.b;
+  var box=(k==="none")?"":'<path d="'+segsSVG(shapeSegs(k,w,h),0,0)+'" fill="#ffffff" stroke="#9aa3ad" stroke-width="0.8"/>';
+  var px=I.l+iw*0.14, py=I.t+ih*0.30, pw=iw*0.72, ph=ih*0.42;
+  return '<svg viewBox="-2 -2 60 74" xmlns="http://www.w3.org/2000/svg">'+box+
+    '<rect x="'+n2(px)+'" y="'+n2(py)+'" width="'+n2(pw)+'" height="'+n2(ph)+'" rx="2" fill="#cbd5e1"/>'+
+    '<rect x="'+n2(I.l+iw*0.08)+'" y="'+n2(I.t+ih*0.08)+'" width="'+n2(iw*0.46)+'" height="3" rx="1" fill="'+(t.nameC||"#0e7490")+'"/>'+
+    '<rect x="'+n2(I.l+iw*0.08)+'" y="'+n2(I.t+ih*0.08+4.5)+'" width="'+n2(iw*0.3)+'" height="3" rx="1" fill="'+(t.nameC||"#0e7490")+'" opacity=".6"/>'+
+    '<rect x="'+n2(I.l+iw*0.60)+'" y="'+n2(I.t+ih*0.05)+'" width="'+n2(iw*0.34)+'" height="'+n2(Math.max(7,ih*0.16))+'" rx="1.5" fill="'+(t.tagBg||"#fde047")+'"/>'+
+    '<text x="'+n2(I.l+iw*0.77)+'" y="'+n2(I.t+ih*0.05+Math.max(7,ih*0.16)*0.72)+'" text-anchor="middle" font-size="6" font-weight="800" fill="'+(t.tagT||"#dc2626")+'" font-family="Arial,sans-serif">9.50</text>'+
+    '</svg>';
+}
 function applyThemeVars(){
   var t=S.theme, r=document.documentElement.style;
   var solid = t.bgMode==="solid";
@@ -4969,9 +5162,12 @@ function cardHTML(p,b,c,L){
   if(ifil) ist+='filter:'+ifil+';';
   var bsh=boxShadowCss(S.boxSh);
   if(bsh) style+='box-shadow:'+bsh+';';
-  var h='<div class="card'+(c.blank?" blank":"")+(c.sel?" picked":"")+(tup?" tup":"")+(url?"":" nophoto")+(c.bare?" bare":"")+
+  var shaped=!!(c.shape && !c.bare);
+  if(shaped && bsh) style=style.replace('box-shadow:'+bsh+';','');
+  var h='<div class="card'+(c.blank?" blank":"")+(c.sel?" picked":"")+(tup?" tup":"")+(url?"":" nophoto")+(c.bare?" bare":"")+(shaped?" shaped":"")+
     ((typeof SEL_CARD!=="undefined"&&SEL_CARD===p.id)?" selbox":"")+
     '" data-cat="'+escH(p.category||"")+'" data-id="'+escH(p.id)+'" style="'+style+'">';
+  if(shaped) h+=shapeHTML(c);
   if(p.__chg && !c.blank) h+='<div class="chgchip chg-'+escH(p.__chg.k)+'" data-a="chg" title="The client changed this in the sheet — click when you have checked it">'+escH(chgLabel(p))+'</div>';
   h+='<div class="cimg"'+(url?' data-img="'+escH(p.id)+'"':'')+' style="'+ist+'">'+
     (url?'':'<div class="ph">'+escH(p.image||"")+'</div>')+
@@ -6474,7 +6670,17 @@ function computeLayout(){
     }
     if(tp.bar) nameBlock=Math.max(nameBlock, priceFs+3.0);          /* the bar is never lower than the price needs */
     var cards=[], heads=[];
+    /* a shaped box: its contents are laid out in the shape's inner area,
+       and the outline is drawn over the whole slot */
     var mkCard=function(p,x,y,cw,ch,ri){
+      var sk=boxShapeOf(p), n0=cards.length;
+      if(sk==="rect"){ mkCard0(p,x,y,cw,ch,ri); return; }
+      if(sk==="none"){ mkCard0(p,x,y,cw,ch,ri); if(cards.length>n0) cards[cards.length-1].bare=true; return; }
+      var I=shapeInset(sk,cw,ch);
+      mkCard0(p,x+I.l,y+I.t,Math.max(4,cw-I.l-I.r),Math.max(4,ch-I.t-I.b),ri);
+      if(cards.length>n0) cards[cards.length-1].shape={k:sk, dx:-I.l, dy:-I.t, w:cw, h:ch};
+    };
+    var mkCard0=function(p,x,y,cw,ch,ri){
       var raw=p.prices[b.priceCol]||"";
       var price=raw?fmtPrice(raw):(p.blank?PH_PRICE:"");
       var big=parseFloat(price)>=(t.bigFrom||1e9);
@@ -6861,7 +7067,24 @@ async function buildSVGs(){
     for(var c of P.cards){
       ci++;
       if(grp) s.push('<g id="product-'+ci+'">');
-      if(shOn(S.boxSh) && !c.bare){
+      if(c.shape && !c.bare){
+        var Sg=shapeSegs(c.shape.k,c.shape.w,c.shape.h), sox=c.x+c.shape.dx, soy=c.y+c.shape.dy;
+        if(shOn(S.boxSh)){
+          var sbS=S.boxSh, scS=(sbS.c||"#000000"), saS=n2(shAlpha(sbS));
+          if(sbS.k==="outline"){
+            var eS=shNum(sbS.size,0.5);
+            s.push('<path d="'+segsSVG(Sg,sox,soy)+'" fill="'+scS+'" fill-opacity="'+saS+'" stroke="'+scS+'" stroke-opacity="'+saS+'" stroke-width="'+n2(2*eS)+'" stroke-linejoin="round"/>');
+          } else {
+            var ofx=(sbS.k==="glow")?0:shNum(sbS.dx,sbS.k==="backdrop"?1.2:0), ofy=(sbS.k==="glow")?0:shNum(sbS.dy,sbS.k==="backdrop"?1.2:0);
+            var useFS=(shNum(sbS.blur,0)>0.05 && sbS.k!=="backdrop");
+            s.push('<path d="'+segsSVG(Sg,sox+ofx,soy+ofy)+'" fill="'+scS+'" fill-opacity="'+saS+'"'+(useFS?' filter="url(#bxsh)"':'')+'/>');
+          }
+        }
+        s.push('<path d="'+segsSVG(Sg,sox,soy)+'" fill="'+t.cardBg+'"'+
+          (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
+          (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/>');
+      }
+      if(shOn(S.boxSh) && !c.bare && !c.shape){
         var sb=S.boxSh, sc0=(sb.c||"#000000"), sa0=n2(shAlpha(sb));
         if(sb.k==="outline"){
           var e0=shNum(sb.size,0.5);
@@ -6874,7 +7097,7 @@ async function buildSVGs(){
             '" rx="'+n2(rx)+'" fill="'+sc0+'" fill-opacity="'+sa0+'"'+(useF?' filter="url(#bxsh)"':'')+'/>');
         }
       }
-      if(!c.bare) s.push('<rect x="'+n2(c.x)+'" y="'+n2(c.y)+'" width="'+n2(c.w)+'" height="'+n2(c.h)+'" rx="'+n2(rx)+'" fill="'+t.cardBg+'"'+
+      if(!c.bare && !c.shape) s.push('<rect x="'+n2(c.x)+'" y="'+n2(c.y)+'" width="'+n2(c.w)+'" height="'+n2(c.h)+'" rx="'+n2(rx)+'" fill="'+t.cardBg+'"'+
         (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
         (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/>');
       if(c.band) s.push(polySVG(c.band, c.x, c.y));
@@ -7163,7 +7386,25 @@ async function buildVectorPDF(mode){
     for(var c of P.cards){
       var cx=c.x*K, cyB=Y(c.y+c.h), cw=c.w*K, chh=c.h*K;
       var CC=[], cUsed={};
-      if(!c.bare){
+      if(c.shape && !c.bare){
+        var PS=shapeSegs(c.shape.k,c.shape.w,c.shape.h), pox=c.x+c.shape.dx, poy=c.y+c.shape.dy;
+        var PX=function(v){ return v*K; };
+        if(shOn(S.boxSh)){
+          var shP=S.boxSh, crP=col(shP.c||"#000000");
+          var pdx=(shP.k==="glow"||shP.k==="outline")?0:shNum(shP.dx,shP.k==="backdrop"?1.2:0);
+          var pdy=(shP.k==="glow"||shP.k==="outline")?0:shNum(shP.dy,shP.k==="backdrop"?1.2:0);
+          if(shP.k==="outline")
+            CC.push("q /"+gsName(shAlpha(shP))+" gs "+crP+" rg "+crP+" RG "+n2(2*shNum(shP.size,0.5)*K)+" w 1 j "+segsPDF(PS,pox,poy,PX,Y)+" B Q");
+          else
+            CC.push("q /"+gsName(shAlpha(shP))+" gs "+crP+" rg "+segsPDF(PS,pox+pdx,poy+pdy,PX,Y)+" f Q");
+        }
+        var gaS=(gsCard?("/"+gsCard+" gs "):"");
+        if(bwPt>0.05)
+          CC.push("q "+gaS+col(t.cardBg)+" rg "+col(t.cardBc)+" RG "+n2(bwPt)+" w "+segsPDF(PS,pox,poy,PX,Y)+" B Q");
+        else
+          CC.push("q "+gaS+col(t.cardBg)+" rg "+segsPDF(PS,pox,poy,PX,Y)+" f Q");
+      }
+      else if(!c.bare){
         boxShadowOps(c).forEach(function(op){ CC.push(op); });
         var ga=(gsCard?("/"+gsCard+" gs "):"");
         if(bwPt>0.05)
@@ -8184,6 +8425,7 @@ function syncPanel(){
   document.getElementById("vxVal").textContent=S.validX;
   paintGPal(); syncSingle(); paintSpBannerState(); paintShare();
   paintPageList();
+  paintShapeGal();
   refreshHexBoxes();                   /* again, now that every colour box holds this branch's colour */
 }
 
@@ -8936,6 +9178,34 @@ function selProducts(){
   ids.forEach(function(id){ var p=findItem(id); if(p) out.push(p); });
   return out;
 }
+function paintShapeGal(){
+  var el=document.getElementById("shapeGal"); if(!el) return;
+  var cur=(S.theme&&S.theme.boxShape)||"rect";
+  el.innerHTML=BOX_SHAPES.map(function(sh){
+    return '<div class="sp'+(sh.k===cur?" on":"")+'" data-k="'+sh.k+'" title="'+escH(sh.n)+'">'+shapeThumb(sh.k)+'<i>'+escH(sh.n)+'</i></div>';
+  }).join("");
+  [].forEach.call(el.querySelectorAll(".sp"),function(b){
+    b.onclick=function(){
+      var k=b.getAttribute("data-k");
+      var picked=Object.keys(S.sel||{}).filter(function(id){ return S.sel[id]; });
+      if(picked.length){
+        var n=0; picked.forEach(function(id){ var p=findItem(id); if(p){ p.shape=k; n++; } });
+        toast(n+" picked box(es) now: "+b.title+".  The rest keep the flyer's shape.");
+      } else {
+        S.theme.boxShape=k;
+        S.products.concat(S.blanks).forEach(function(p){ delete p.shape; });   /* one shape for the whole flyer */
+      }
+      paintShapeGal(); snap(); saveState(); render();
+    };
+  });
+}
+document.getElementById("btnShapeClear").onclick=function(){
+  var picked=Object.keys(S.sel||{}).filter(function(id){ return S.sel[id]; }), n=0;
+  if(!picked.length){ toast("Pick the boxes first — Shift+click them, or select one and press Space.",1); return; }
+  picked.forEach(function(id){ var p=findItem(id); if(p && p.shape){ delete p.shape; n++; } });
+  toast(n ? (n+" box(es) back to the flyer's shape.") : "Those boxes already use the flyer's shape.");
+  snap(); saveState(); render();
+};
 function paintBulk(){
   var n=selIds().length;
   document.getElementById("bulkCount").textContent = n
