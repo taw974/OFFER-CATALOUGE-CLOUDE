@@ -1140,6 +1140,7 @@ body.exporting .page{box-shadow:none}
           <div class="sw"><label>Name band fill</label><input type="color" id="c_bandBg"></div>
           <div class="sw"><label>Band fill 2</label><input type="color" id="c_bandBg2"></div>
           <div class="sw"><label>Band text</label><input type="color" id="c_bandT"></div>
+          <div class="sw"><label>Tag lower half (split circle)</label><input type="color" id="c_tagLo"></div>
         </div>
         <div class="hint">Tag fill 2 makes the tag a gradient (same as fill 1 = flat). The band colours are for designs 8–11,
         the ones with a name band along the bottom of the box.</div>
@@ -1747,7 +1748,36 @@ var TPL=[
   tagPos:"br", shape:"slant", namePos:"bc", qr:"none", fold:null, rule:null, curAbove:true,
   bar:{split:0.55, align:"middle", gap:0.7, slant:true},
   card:{bg:"#ffffff",bc:"#e8351f",bw:1,r:3,nc:"#1e2a8a"},
-  tag:{bg:"#e21b1b",bg2:"#ff5a3c",fg:"#ffe600"}, band:{bg:"#ffe600",bg2:"#ffe600",text:"#1e2a8a"}}
+  tag:{bg:"#e21b1b",bg2:"#ff5a3c",fg:"#ffe600"}, band:{bg:"#ffe600",bg2:"#ffe600",text:"#1e2a8a"}},
+
+ /* ---- the client's six from Price tag.zip: big numbers with small decimals, a dotted
+         gradient box.  pad: the tag sits flush with the box edge (inside the stroke);
+         namePos "bs": the name runs along the bottom, beside the tag;
+         prevIn: the old price sits inside the tag, crossed out, above the new one;
+         dec: the small-decimals position the design uses. ---- */
+ {k:"drop", n:"12 — Half circle hanging from the top right",
+  tagPos:"tr", shape:"drop", namePos:"tl", qr:"none", fold:null, rule:null, pad:{x:1.6,y:0}, dec:"mid",
+  card:{bg:"#ffffff",bc:"#1ec2dc",bc2:"#f5d547",bs:"dotted",bgd:"h",bw:3,r:2,nc:"#2e3192"}, tag:{bg:"#ffed00",fg:"#ff1a1a"}},
+
+ {k:"heart", n:"13 — Heart, bottom left, name beside it",
+  tagPos:"bl", shape:"heart", namePos:"bs", qr:"none", fold:null, rule:null, dec:"mid",
+  card:{bg:"#ffffff",bc:"#1ec2dc",bc2:"#f5d547",bs:"dotted",bgd:"d",bw:3,r:2,nc:"#2e3192"}, tag:{bg:"#ffed00",fg:"#ff1a1a"}},
+
+ {k:"burstbl", n:"14 — Starburst, bottom left, name beside it",
+  tagPos:"bl", shape:"badge", namePos:"bs", qr:"none", fold:null, rule:null, dec:"mid", fill:true,
+  card:{bg:"#ffffff",bc:"#1ec2dc",bc2:"#f5d547",bs:"dotted",bgd:"d",bw:3,r:2,nc:"#2e3192"}, tag:{bg:"#ffed00",fg:"#ff1a1a"}},
+
+ {k:"pillbl", n:"15 — Rounded block, bottom left, name beside it",
+  tagPos:"bl", shape:"rblock", namePos:"bs", qr:"none", fold:null, rule:null, dec:"base", fill:true,
+  card:{bg:"#ffffff",bc:"#1ec2dc",bc2:"#f5d547",bs:"dotted",bgd:"d",bw:3,r:2,nc:"#2e3192"}, tag:{bg:"#ffed00",fg:"#ff1a1a"}},
+
+ {k:"splitc", n:"16 — Split circle: old price over the new one, bottom right",
+  tagPos:"br", shape:"split", namePos:"bs", qr:"none", fold:null, rule:null, prevIn:{c:"#ffffff"}, dec:"base",
+  card:{bg:"#ffffff",bc:"#7c4dff",bc2:"#10b981",bs:"dotted",bgd:"h",bw:3,r:2,nc:"#2e3192"}, tag:{bg:"#ff1a1a",lo:"#ffed00",fg:"#ff1a1a"}},
+
+ {k:"quarter", n:"17 — Corner quarter circle: old and new price, bottom right",
+  tagPos:"br", shape:"quarter", namePos:"bs", qr:"none", fold:null, rule:null, pad:{x:0,y:0}, prevIn:{c:"#1a9e2a"}, dec:"base",
+  card:{bg:"#ffffff",bc:"#111111",bs:"dotted",bw:3,r:0,nc:"#2e3192"}, tag:{bg:"#f8e514",fg:"#ff1a1a"}}
 ];
 /* the second tag colour, when the tag has a gradient */
 function tagGrad(){ var t=S.theme; return (t.tagBg2 && t.tagBg2!==t.tagBg) ? [t.tagBg, t.tagBg2] : null; }
@@ -1854,12 +1884,81 @@ function tagSuffix(tp, qrOn){
   var lab=curLabel();
   return (qrOn && lab && !tplHasQR(tp) && (curCfg().pos||"before")==="after") ? lab : "";
 }
+/* ---- outlines for the round tags, as polygons (every renderer draws polygons) ---- */
+function circlePts(cx,cy,r,a0,a1,n){ var pts=[]; for(var i=0;i<=n;i++){ var a=a0+(a1-a0)*i/n; pts.push([cx+Math.cos(a)*r, cy+Math.sin(a)*r]); } return pts; }
+function roundRectPts(x,y,w,h,r){
+  r=Math.max(0,Math.min(r,w/2,h/2));
+  return circlePts(x+w-r,y+r,r,-Math.PI/2,0,8).concat(circlePts(x+w-r,y+h-r,r,0,Math.PI/2,8),
+         circlePts(x+r,y+h-r,r,Math.PI/2,Math.PI,8), circlePts(x+r,y+r,r,Math.PI,Math.PI*1.5,8));
+}
+function heartPts(W,H){
+  var raw=[], N=72, x0=1e9, x1=-1e9, y0=1e9, y1=-1e9;
+  for(var i=0;i<N;i++){ var t=2*Math.PI*i/N;
+    var x=16*Math.pow(Math.sin(t),3), y=-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t));
+    raw.push([x,y]); x0=Math.min(x0,x); x1=Math.max(x1,x); y0=Math.min(y0,y); y1=Math.max(y1,y); }
+  return raw.map(function(q){ return [(q[0]-x0)/(x1-x0)*W, (q[1]-y0)/(y1-y0)*H]; });
+}
+/* the old price inside a tag: a share of the new price's size.  It follows the
+   old-price size slider, a little larger than the chip (55 -> 72 %), because
+   inside the tag it is read next to the new price, not on its own. */
+function oldInScale(){ var v=parseFloat(S.oldP&&S.oldP.scale); v=isFinite(v)?Math.max(30,Math.min(90,v)):55; return Math.min(0.9, v*1.3/100); }
+/* the new price on one line with its currency / NOW; anchor "middle" (x = centre) or "end" (x = right edge) */
+function priceLine(g, tp, qrOn, price, fs, x, baseY, anchor, fill){
+  var preT=tagPrefix(tp,qrOn), sufT=tagSuffix(tp,qrOn), cs=fs*curScale(), k=priceK();
+  var pw=priceW(price,fs), qw=preT?textW(preT,cs,k)+fs*0.2:0, sw=sufT?textW(sufT,cs,k)+fs*0.2:0, tot=pw+qw+sw;
+  var sx=(anchor==="end") ? x-tot : x-tot/2;
+  if(preT) g.statics.push({t:preT, x:sx, y:baseY-fs*0.06, size:cs, fill:fill, anchor:"start"});
+  if(sufT) g.statics.push({t:sufT, x:sx+qw+pw+fs*0.2, y:baseY-fs*0.06, size:cs, fill:fill, anchor:"start"});
+  g.price={x:sx+qw, y:baseY, size:fs, fill:fill, anchor:"start", box:{x:sx+qw, y:baseY-fs*0.98, w:pw+0.6, h:fs*1.24}};
+  return tot;
+}
+/* the whole width of a price line with its currency / NOW, per 1 mm of type */
+function priceLineW(tp, qrOn, price){
+  var preT=tagPrefix(tp,qrOn), sufT=tagSuffix(tp,qrOn), k=priceK();
+  return priceW(price,1)+(preT?textW(preT,curScale(),k)+0.2:0)+(sufT?textW(sufT,curScale(),k)+0.2:0);
+}
+/* The round designs let the price fill the tag, like a hand-made price card:
+   it may grow up to 1.5x the chosen price size.  Every price is sized as if it
+   were "00.00" wide, so 5 and 3.25 on one page come out the same size; only a
+   longer price (160.50) is made smaller, to fit. */
+function fillFs(tp, qrOn, price, priceFs, room, hCap){
+  var lw=Math.max(0.3, priceLineW(tp,qrOn,price)), cap=(hCap>0)?hCap:1e9;
+  var base=Math.min(priceFs, room/lw, cap);
+  var grow=(tp.fill===false) ? priceFs : priceFs*1.5;
+  var ref=Math.max(lw, priceLineW(tp,qrOn,"00.00"));
+  return Math.max(base, Math.min(grow, room/ref, cap));
+}
+/* the old price inside the tag: its digits (small decimals too) and a strike in the same colour */
+function oldPriceStatics(g, str, x, baseY, fs, fill, anchor){
+  var w=priceW(str,fs), sx=(anchor==="end") ? x-w : x-w/2;
+  priceRuns({x:0, y:baseY, size:fs, anchor:"start"}, str).forEach(function(R){
+    g.statics.push({t:R.t, x:sx+R.x, y:R.y, size:R.size, fill:fill, anchor:"start"}); });
+  if(S.oldP && S.oldP.strike===false) return;
+  var sy=baseY-capK(priceK())*fs*0.45, sh=Math.max(0.18, fs*0.09);
+  g.polys.push({pts:[[sx-0.3,sy-sh/2],[sx+w+0.3,sy-sh/2],[sx+w+0.3,sy+sh/2],[sx-0.3,sy+sh/2]], fill:fill});
+}
+
 /* How big the tag must be for this price, in mm.  It never shrinks below a
    share of the product box, so the tag stays a real design element and not a
    sticker, and it never grows wider than the box either. */
-function tagSize(tp, price, priceFs, qrOn, cw, ch, minFrac){
+function tagSize(tp, price, priceFs, qrOn, cw, ch, minFrac, opts){
   if(minFrac==null) minFrac=0.36;
   if(price==="") return {w:0,h:0};
+  var pvS=(opts&&opts.prev)||"", ofs=priceFs*oldInScale(), lw=priceLineW(tp,qrOn,price);
+  var sqr=function(d){ d=Math.min(d, cw-2*TAGPAD-0.6, ch-2*TAGPAD-0.6); d=Math.max(d, 2); return {w:d, h:d}; };
+  if(tp.shape==="heart")
+    return sqr(Math.max((lw*priceFs+priceFs*0.4)/0.66, priceFs*2.6, Math.min(cw,ch)*minFrac));
+  if(tp.shape==="split")
+    return sqr(Math.max((lw*priceFs+priceFs*0.5)/0.8, priceFs*2.5, pvS?(priceW(pvS,ofs)+ofs*0.8)/0.64:0, Math.min(cw,ch)*minFrac));
+  if(tp.shape==="quarter"){
+    var dq=Math.max((lw*priceFs+priceFs*0.5)/0.7, priceFs*(pvS?3.3:2.5), pvS?(priceW(pvS,ofs)+ofs)/0.5:0, Math.min(cw,ch)*minFrac*1.15);
+    dq=Math.max(2, Math.min(dq, cw-0.6, ch-0.6)); return {w:dq, h:dq};
+  }
+  if(tp.shape==="drop"){
+    var wd=Math.max(lw*priceFs+priceFs*0.9, priceFs*2.3, cw*minFrac*0.85);
+    wd=Math.min(wd, cw-2*TAGPAD-0.6);
+    return {w:wd, h:Math.max(priceFs*1.7, Math.min(wd*0.9, ch-TAGPAD-0.6))};
+  }
   if(tp.shape==="badge"){
     var d=Math.max(priceW(price,priceFs)+priceFs*1.45, priceFs*2.15,
                    Math.min(cw,ch)*(minFrac*0.94));
@@ -1883,9 +1982,51 @@ function tagSize(tp, price, priceFs, qrOn, cw, ch, minFrac){
    -> statics : text drawn by the exporter only (never editable)
    -> price   : {x,y,size,fill,anchor, box:{x,y,w,h}} — x/y is the BASELINE for
                 the exporters, box is the rectangle the screen centres it in. */
-function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
+function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg, opts){
   var g={polys:[], statics:[], price:null};
   if(price==="") return g;
+  opts=opts||{};
+  var pvG=opts.prev||"", oldC=opts.oldC||themeVal("prevC"), loC=opts.lo||themeVal("tagLo");
+
+  if(tp.shape==="heart"){
+    g.polys.push({pts:heartPts(W,H), fill:colBg, grad:tagGrad()});
+    var fsH=fillFs(tp, qrOn, price, priceFs, W*0.62, H*0.36), cyH=H*0.47;
+    priceLine(g, tp, qrOn, price, fsH, W/2, cyH+fsH*0.36, "middle", colFg);
+    return g;
+  }
+  if(tp.shape==="split"){
+    var rS=Math.min(W,H)/2, cxS=W/2, cyS=H/2;
+    g.polys.push({pts:circlePts(cxS,cyS,rS,Math.PI,2*Math.PI,40), fill:colBg});
+    g.polys.push({pts:circlePts(cxS,cyS,rS,0,Math.PI,40), fill:loC});
+    var fsN=fillFs(tp, qrOn, price, priceFs, 2*rS*0.68, rS*0.62);
+    priceLine(g, tp, qrOn, price, fsN, cxS, cyS+rS*0.44+fsN*0.36, "middle", colFg);
+    if(pvG){
+      var fsO=Math.min(fsN*oldInScale(), (2*rS*0.62)/Math.max(0.3,priceW(pvG,1)), rS*0.55);
+      oldPriceStatics(g, pvG, cxS, cyS-rS*0.40+fsO*0.36, fsO, oldC, "middle");
+    }
+    return g;
+  }
+  if(tp.shape==="quarter"){
+    /* the square corner sits in the box corner: bottom right on the flyer,
+       top right on a single page (opts.corner) */
+    var RQ=Math.min(W,H), upQ=((opts.corner||tp.tagPos)==="tr"), ckQ=capK(priceK());
+    g.polys.push({pts:upQ ? [[W,0]].concat(circlePts(W,0,RQ,0.5*Math.PI,Math.PI,36))
+                          : [[W,H]].concat(circlePts(W,H,RQ,Math.PI,1.5*Math.PI,36)), fill:colBg, grad:tagGrad()});
+    var mQ=Math.max(0.8, RQ*0.07), fsQ=fillFs(tp, qrOn, price, priceFs, RQ*0.7, RQ*(pvG?0.3:0.42));
+    var fsQo=pvG ? Math.min(fsQ*oldInScale(), (RQ*0.5)/Math.max(0.3,priceW(pvG,1))) : 0;
+    /* the old price always reads above the new one */
+    var yQ=upQ ? mQ+(pvG?ckQ*fsQo+fsQo*0.35:0)+ckQ*fsQ : H-mQ;
+    priceLine(g, tp, qrOn, price, fsQ, W-mQ, yQ, "end", colFg);
+    if(pvG) oldPriceStatics(g, pvG, W-mQ, yQ-ckQ*fsQ-fsQo*0.35, fsQo, oldC, "end");
+    return g;
+  }
+  if(tp.shape==="drop"){
+    var rD=W/2, yC=Math.max(0, H-rD);
+    g.polys.push({pts:[[0,0],[W,0]].concat(circlePts(rD,yC,rD,0,Math.PI,36)), fill:colBg, grad:tagGrad()});
+    var fsD=fillFs(tp, qrOn, price, priceFs, W*0.8, Math.min(H*0.5, W*0.4));
+    priceLine(g, tp, qrOn, price, fsD, W/2, Math.min(H*0.44, yC+rD*0.2)+fsD*0.36, "middle", colFg);
+    return g;
+  }
 
   if(tp.shape==="badge"){
     var r=Math.min(W,H)/2, cx=W/2, cy=H/2, N=20, pts=[], i;
@@ -1895,6 +2036,7 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
     }
     g.polys.push({pts:pts, fill:colBg, grad:tagGrad()});
     var qy=0;
+    if(tp.fill) priceFs=fillFs(tp, qrOn, price, priceFs, W*0.64, W*0.3);
     var preB=tagPrefix(tp,qrOn), sufB=tagSuffix(tp,qrOn);
     if(qrOn && tp.qr==="in" && curLabel()) preB=[curLabel(),preB].filter(Boolean).join(" ");
     var above=[preB,sufB].filter(Boolean).join(" ");
@@ -1909,10 +2051,11 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
   }
 
   var gr=tagGrad();
-  if(tp.shape==="block"||tp.shape==="slant"){
-    /* a plain block, or a parallelogram whose top edge sits a little to the left of its bottom edge */
+  if(tp.shape==="block"||tp.shape==="slant"||tp.shape==="rblock"){
+    /* a plain block, a rounded one, or a parallelogram whose top edge sits a little to the left of its bottom edge */
     var sl=(tp.shape==="slant")?H*0.32:0;
-    g.polys.push({pts:[[0,0],[W-sl,0],[W,H],[sl,H]], fill:colBg, grad:gr});
+    if(tp.shape==="rblock") g.polys.push({pts:roundRectPts(0,0,W,H,H*0.3), fill:colBg, grad:gr});
+    else g.polys.push({pts:[[0,0],[W-sl,0],[W,H],[sl,H]], fill:colBg, grad:gr});
     var preS=tagPrefix(tp,qrOn), sufS=tagSuffix(tp,qrOn), midX=W/2;
     if(tp.curAbove && (preS||sufS)){
       /* the currency sits above the number, small */
@@ -1923,7 +2066,7 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
       g.price={x:midX, y:fsC*1.15+0.4+pf*0.92, size:pf, fill:colFg, anchor:"middle",
                box:{x:sl, y:fsC*1.15+0.4, w:W-2*sl, h:pf*1.15}};
     } else {
-      var pfB=Math.min(priceFs, H/1.32);
+      var pfB=tp.fill ? fillFs(tp, qrOn, price, priceFs, W-H*0.5, H/1.32) : Math.min(priceFs, H/1.32);
       var baseS=H*0.5+pfB*0.36;
       if(preS||sufS){
         var csS=pfB*curScale(), pwS=priceW(price,pfB);
@@ -1982,9 +2125,11 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
    The tag is always held clear of the card edge — that inset is what stops an
    importer from reading the tag as belonging to the box next door. */
 function tagOrigin(tp, cw, ch, tw, th){
-  var pad=(tp.bar && !tp.bar.full)?0:TAGPAD;
+  var pad=(tp.bar && !tp.bar.full)?0:TAGPAD, px=pad, py=pad;
+  /* a tag that sits flush with the box edge — just inside the stroke */
+  if(tp.pad){ var bb=boxBorder().bw; px=(tp.pad.x||0)+bb; py=(tp.pad.y||0)+bb; }
   var left=(tp.tagPos==="bl"||tp.tagPos==="tl"), top=(tp.tagPos==="tr"||tp.tagPos==="tl");
-  return {x: left ? pad : cw-tw-pad, y: top ? pad : ch-th-pad};
+  return {x: left ? px : cw-tw-px, y: top ? py : ch-th-py};
 }
 
 function themeVal(k){
@@ -5063,8 +5208,36 @@ function revealInPanel(el){
 /* ----------------------- price-tag template gallery -----------------------
    Every tag design drawn small, with a real price, from the same geometry
    the flyer uses — what you click is what you get.                       */
+/* a small box with its stroke, NAME where the design puts it and the tag in its corner */
+function tplCardPreview(tp){
+  var W=44, H=30, fs=5.6, card=tp.card||{}, tg=tp.tag||{};
+  var pv=tp.prevIn?"12.75":"", bwv=Math.max(0.5,(card.bw||0)/3.78*1.4);
+  var TS=tagSize(tp,"9.50",fs,!!S.qrPrefix,W,H,undefined,{prev:pv}), tw=TS.w, th=TS.h;
+  var g=tagGeom(tp,tw,th,"9.50",fs,!!S.qrPrefix,tg.bg||"#fde047",tg.fg||"#dc2626",
+                {prev:pv, lo:tg.lo||tg.fg, oldC:(tp.prevIn&&tp.prevIn.c)||"#9aa3ad"});
+  var pad=(tp.pad?(tp.pad.x||0):TAGPAD)+(tp.pad?bwv:0), padY=(tp.pad?(tp.pad.y||0):TAGPAD)+(tp.pad?bwv:0);
+  var left=(tp.tagPos==="bl"||tp.tagPos==="tl"), top=(tp.tagPos==="tr"||tp.tagPos==="tl");
+  var ox=left?pad:W-tw-pad, oy=top?padY:H-th-padY;
+  var id="tpv"+tp.k, sv='<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 '+(W+2)+' '+(H+2)+'" font-family="'+escH(S.fontPrice||S.font)+'" font-weight="800">';
+  var stroke=card.bc||"#cbd5e1";
+  if(card.bc2){ sv+='<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="1" y2="'+(card.bgd==="h"?0:1)+'"><stop offset="0" stop-color="'+card.bc+'"/><stop offset="1" stop-color="'+card.bc2+'"/></linearGradient></defs>'; stroke='url(#'+id+')'; }
+  var dash=card.bs==="dotted"?' stroke-dasharray="0 '+n2(bwv*2.2)+'" stroke-linecap="round"':card.bs==="dashed"?' stroke-dasharray="'+n2(bwv*3)+' '+n2(bwv*2)+'"':'';
+  sv+='<rect x="'+n2(bwv/2)+'" y="'+n2(bwv/2)+'" width="'+n2(W-bwv)+'" height="'+n2(H-bwv)+'" rx="'+n2(Math.min(3,(card.r||0)/3))+'" fill="'+(card.bg||"#ffffff")+'"'+
+    ((card.bw||0)>0?(' stroke="'+stroke+'" stroke-width="'+n2(bwv)+'"'+dash):'')+'/>';
+  sv+='<rect x="'+n2(W*0.3)+'" y="'+n2(H*0.22)+'" width="'+n2(W*0.4)+'" height="'+n2(H*0.36)+'" rx="1" fill="#e2e8f0"/>';
+  var nc=card.nc||"#0e7490", nfs=3.4, nx=2.2, ny=4.6, anc="start";
+  if(tp.namePos==="bc"){ nx=W/2; ny=H-2.2; anc="middle"; }
+  else if(tp.namePos==="bs"){ ny=oy+th/2+nfs*0.36; nx=left?ox+tw+1.2:2.2; }
+  sv+='<text x="'+n2(nx)+'" y="'+n2(ny)+'" font-size="'+nfs+'" fill="'+nc+'" text-anchor="'+anc+'">NAME</text>';
+  g.polys.forEach(function(P){ sv+=polySVG(P,ox,oy); });
+  g.statics.forEach(function(T){ sv+='<text x="'+n2(ox+T.x)+'" y="'+n2(oy+T.y)+'" font-size="'+n2(T.size)+'" fill="'+T.fill+'" text-anchor="'+(T.anchor||"start")+'">'+escX(T.t)+'</text>'; });
+  if(g.price) priceRuns(g.price, "9.50").forEach(function(R){
+    sv+='<text x="'+n2(ox+R.x)+'" y="'+n2(oy+R.y)+'" font-size="'+n2(R.size)+'" fill="'+g.price.fill+'" text-anchor="'+R.anchor+'">'+escX(R.t)+'</text>'; });
+  return sv+'</svg>';
+}
 function tplPreviewSVG(tp){
   var t=S.theme, priceFs=6.4, W=44, H=20;
+  if(!tp.bar){ try{ return tplCardPreview(tp); }catch(e){ return '<svg viewBox="0 0 44 30"></svg>'; } }
   try{
     var TS=tagSize(tp,"9.50",priceFs,!!S.qrPrefix,W,H), tw=TS.w, th=TS.h;
     var g=tagGeom(tp,tw,th,"9.50",priceFs,!!S.qrPrefix,t.tagBg,t.tagT);
@@ -5355,7 +5528,7 @@ function cardHTML(p,b,c,L){
   /* on the bottom row the little toolbar would fall off the sheet - flip it up */
   var tup=((c.y+c.h) > 297-11);
   var nst='position:absolute;top:'+n2(c.nameTop)+'mm;height:'+n2(c.nameBlock)+'mm;z-index:3;'+
-    (c.band?('left:'+n2(c.nameLeft+(c.nameDx||0))+'mm;width:'+n2(c.nameW)+'mm;'+(c.nameFill?('color:'+c.nameFill+';'):''))
+    ((c.band||c.beside)?('left:'+n2(c.nameLeft+(c.nameDx||0))+'mm;width:'+n2(c.nameW)+'mm;'+(c.nameFill?('color:'+c.nameFill+';'):''))
            :('left:'+n2(c.nameDx||0)+'mm;right:'+n2(-(c.nameDx||0))+'mm;'))+
     'font-size:'+(c.fs/0.3528).toFixed(2)+'pt;--shimW:'+n2(c.shimW)+'mm;--shimH:'+n2(c.shimH)+'mm;';
   /* The picture box is the WHOLE picture area, with the shadow's breathing
@@ -5389,7 +5562,7 @@ function cardHTML(p,b,c,L){
   var lines = c.lines.length ? c.lines : [String(p.name||"")];
   if(c.band) h+='<svg class="bandsvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+n2(c.w)+' '+n2(c.h)+'" style="position:absolute;left:0;top:0;width:'+n2(c.w)+'mm;height:'+n2(c.h)+'mm;z-index:2;pointer-events:none;border-radius:var(--cardR);overflow:hidden">'+polySVG(c.band)+'</svg>';
   var alCls=(c.nameAnchor==="middle")?" al-c":(c.nameAnchor==="end")?" al-r":" al-l";
-  h+='<div class="cname'+(c.bottomName?" bc":"")+(c.band?" band":"")+alCls+'" style="'+nst+
+  h+='<div class="cname'+(c.bottomName?" bc":"")+((c.band||c.beside)?" band":"")+alCls+'" style="'+nst+
     (c.namePad?('padding-left:'+n2(c.namePad)+'mm;padding-right:'+n2(c.namePad)+'mm;'):'')+'" contenteditable="true" spellcheck="false" data-f="name">'+
      lines.map(function(ln){ return '<div class="ln">'+escH(ln)+'</div>'; }).join("")+'</div>';
   if(c.ar) h+='<div class="carab" dir="rtl" contenteditable="true" spellcheck="false" data-f="ar" style="right:'+n2(c.w-(c.ar.x-c.x))+'mm;top:'+
@@ -6700,6 +6873,7 @@ function currentCells(){
    single pages, so whatever the flyer shows, a single page shows too */
 function prevGeom(p, price, priceFs, x, y, cw, ch, org, tw, th, odx, ody){
   var b=BRANCHES[S.branch];
+  if(tplNow().prevIn) return null;                 /* this design draws the old price inside its tag */
   if(!(S.showPrev && p && p.prev && p.prev[b.priceCol] && price!=="")) return null;
   var pvTxt=fmtPrice(p.prev[b.priceCol]);
   if(!pvTxt || pvTxt===price) return null;
@@ -6899,6 +7073,8 @@ function computeLayout(){
       var need=1, fullW0=unit-2.6;
       /* on the split-bar designs the name only has its share of the bar */
       if(tp.bar && !tp.bar.full) fullW0=Math.max(6, unit*(tp.bar.split||0.55)-(tp.bar.gap||0.6)-2.6-(tp.bar.slant?1.2:0));
+      /* the name beside a bottom tag only has the room the tag leaves */
+      if(tp.namePos==="bs" && !tp.bar) fullW0=Math.max(6, unit-2.6-tagSize(tp,"00.00",priceFs,qrOn,cw,ch).w-0.6-TAGPAD);
       slice.forEach(function(cell){
         if(!cell || !cell.p) return;
         var nm=cell.p.name; if(nm===PH_NAME) return;
@@ -6930,9 +7106,16 @@ function computeLayout(){
       var raw=p.prices[b.priceCol]||"";
       var price=raw?fmtPrice(raw):(p.blank?PH_PRICE:"");
       var big=parseFloat(price)>=(t.bigFrom||1e9);
-      var TS=tagSize(tp,price,priceFs,qrOn,cw,ch), tw=TS.w, th=TS.h;
+      /* the old price that rides inside the tag on the designs that have it there */
+      var pvIn="";
+      if(tp.prevIn && S.showPrev && p.prev && p.prev[b.priceCol] && price!==""){
+        pvIn=fmtPrice(p.prev[b.priceCol]); if(pvIn===price) pvIn=""; }
+      var TS=tagSize(tp,price,priceFs,qrOn,cw,ch,undefined,{prev:pvIn}), tw=TS.w, th=TS.h;
       /* a band along the bottom: the name lives in it, and on the split designs so does the tag */
       var NB=nameBlock, BAND=null, nameLeft=0, nameW=cw, nameMid=(tp.namePos==="bc"), nameSl=0;
+      /* the name beside a bottom tag: the bottom row is as tall as the tag, the photo sits above it */
+      var beside=(tp.namePos==="bs" && !tp.bar && tw>0);
+      if(beside) NB=Math.max(NB, th+(tp.pad?(tp.pad.y||0):TAGPAD)+boxBorder().bw+0.3);
       if(tp.bar){
         var barH=Math.max(nameBlock, (tw?priceFs+2.6:0)+0.4);
         NB=barH;
@@ -6972,12 +7155,18 @@ function computeLayout(){
       if(tw){ var ox0=org.x, oy0=org.y;
         org.x=Math.max(0,Math.min(cw-tw,org.x+tdx)); org.y=Math.max(0,Math.min(ch-th,org.y+tdy));
         EFF.tagDx=org.x-ox0; EFF.tagDy=org.y-oy0; }
-      var geom=tagGeom(tp,tw,th,price,priceFs,qrOn,(big?t.bigBg:t.tagBg),(big?t.bigT:t.tagT));
-      var bottomName=(tp.namePos==="bc");
+      var geom=tagGeom(tp,tw,th,price,priceFs,qrOn,(big?t.bigBg:t.tagBg),(big?t.bigT:t.tagT),{prev:pvIn});
+      var bottomName=(tp.namePos==="bc"||tp.namePos==="bs");
+      /* where the name may run across the box: the band's share, the room beside the tag, or all of it */
+      var NRl=BAND?nameLeft:0, NRw=BAND?nameW:cw;
+      if(beside){
+        if(org.x+tw/2 < cw/2){ NRl=Math.min(cw-6, org.x+tw+0.6); NRw=Math.max(6, cw-NRl); }
+        else { NRl=0; NRw=Math.max(6, org.x-0.6); }
+      }
       var nameTop=bottomName?(ch-NB):0, nameTop0=nameTop;
       nameTop=Math.max(-NB*0.5, Math.min(ch-NB*0.5, nameTop+ndy));
       EFF.nameDy=nameTop-nameTop0;
-      var full=(BAND?nameW:cw)-2.6, narrow=Math.max(4.5, full-tw-0.8);
+      var full=NRw-2.6, narrow=Math.max(4.5, full-tw-0.8);
       var clash=(tw>0 && !bottomName && tp.tagPos==="tr");
       var limAt=function(fs){ return function(k){
         if(!clash) return full;
@@ -6990,14 +7179,14 @@ function computeLayout(){
       var nameY0 = bottomName
         ? nameTop+NB-0.9-arRoom-(nLines-1)*F.fs*1.25-F.fs*0.22
         : nameTop+1.2+F.fs*0.95;
-      if(BAND){ /* the name floats in the middle of the band */
+      if(BAND || beside){ /* the name floats in the middle of the band, or of the row beside the tag */
         var linesH=nLines*F.fs*1.25+arRoom;
         nameY0=nameTop+(NB-linesH)/2+F.fs*0.95;
       }
       /* where the name sits across its room: the design's own way, or what you chose */
       var NA=(function(){
-        var mode=S.nameAlign||"auto", left0=BAND?nameLeft:0, w0=BAND?nameW:cw, pad0=(BAND?nameSl:0)+1.3;
-        var dflt=BAND?(nameMid?"center":"left"):(bottomName?"center":"left");
+        var mode=S.nameAlign||"auto", left0=NRl, w0=NRw, pad0=(BAND?nameSl:0)+1.3;
+        var dflt=BAND?(nameMid?"center":"left"):beside?"left":(bottomName?"center":"left");
         var m=(mode==="auto")?dflt:mode;
         if(m==="center") return {x:left0+w0/2+ndx, anchor:"middle", pad:pad0};
         if(m==="right")  return {x:left0+w0-pad0+ndx, anchor:"end", pad:pad0};
@@ -7005,9 +7194,9 @@ function computeLayout(){
       })();
       /* each line has its own room (the first lines are shorter beside a tag at the top);
          centred and right-aligned text is placed inside that room, the way the screen does it */
-      var roomOf=function(k){ return BAND ? Math.max(1,(BAND?nameW:cw)-2*NA.pad) : limAt(F.fs)(k); };
+      var roomOf=function(k){ return (BAND||beside) ? Math.max(1,NRw-2*NA.pad) : limAt(F.fs)(k); };
       var LX=F.lines.map(function(ln,k){
-        var l0=(BAND?nameLeft:0)+NA.pad+ndx;
+        var l0=NRl+NA.pad+ndx;
         if(NA.anchor==="middle") return l0+roomOf(k)/2;
         if(NA.anchor==="end") return l0+roomOf(k);
         return l0;
@@ -7016,7 +7205,7 @@ function computeLayout(){
       if(hasAr(p)){
         var af=arFit(p.ar, full, arFsBase);
         AR={t:String(p.ar).trim(), fs:af.fs, w:af.w,
-            x:x+(BAND?nameLeft+nameW:cw)-1.3+ndx, y:y+nameTop+NB-0.7-af.fs*0.24};
+            x:x+NRl+NRw-1.3+ndx, y:y+nameTop+NB-0.7-af.fs*0.24};
       }
       /* ---- the old price: a small crossed-out chip beside the tag ---- */
       var PV=prevGeom(p, price, priceFs, x, y, cw, ch, org, tw, th, odx, ody);
@@ -7061,7 +7250,7 @@ function computeLayout(){
         nameTop:nameTop, nameBlock:NB, bottomName:bottomName,
         nameY0:nameY0,
         nameX:NA.x, nameAnchor:NA.anchor, namePad:NA.pad, lineXs:LX, nameDx:ndx, eff:EFF,
-        band:BAND, nameLeft:BAND?nameLeft:0, nameW:BAND?nameW:cw, nameFill:BAND?themeVal("bandT"):null,
+        band:BAND, beside:beside, nameLeft:NRl, nameW:NRw, nameFill:BAND?themeVal("bandT"):null,
         shimW:clash?tw+0.9:0, shimH:clash?th+0.4:0,
         ar:AR, prev:PV,
         rule: tp.rule ? {y:(bottomName?nameTop-0.9:nameTop+NB-0.7), c:tp.rule} : null,
@@ -7120,7 +7309,7 @@ function computeLayout(){
         var cwz=(zw-G*(zc-1))/zc, chz=(zh-G*(zr-1))/zr;
         zonesOut.push({id:z.id, name:z.name, x:zx, y:zy, w:zw, h:zh, cols:zc, rows:zr, n:list.length, box:!!z.box});
         if(!list.length) return;
-        tp=Object.assign({}, tp0, {namePos:(z.namePos==="bottom"?"bc":"tc")});
+        tp=Object.assign({}, tp0, {namePos:(tp0.namePos==="bs"?"bs":(z.namePos==="bottom"?"bc":"tc"))});
         nameFs=nameFs0*Math.max(0.4,Math.min(2.5,(+z.ns||100)/100));
         priceFs=priceFs0*Math.max(0.4,Math.min(2.5,(+z.ps||100)/100));
         arFsBase=nameFs*(S.arScale||0.92);
@@ -7978,10 +8167,12 @@ function slotLayout(p, R){
   var raw=p.prices?(p.prices[b.priceCol]||""):"";
   var price=raw?fmtPrice(raw):(p.blank?PH_PRICE:"");
   var big=parseFloat(price)>=(t.bigFrom||1e9);
-  var TS=tagSize(tp, price, priceFs, !!S.qrPrefix, R.w-2*inner, R.h*0.55, 0.18);
+  var pvIn="";
+  if(tp.prevIn && S.showPrev && p.prev && p.prev[b.priceCol] && price!==""){ pvIn=fmtPrice(p.prev[b.priceCol]); if(pvIn===price) pvIn=""; }
+  var TS=tagSize(tp, price, priceFs, !!S.qrPrefix, R.w-2*inner, R.h*0.55, 0.18, {prev:pvIn});
   var tw=TS.w, th=TS.h;
   var geom=tagGeom(tp, tw, th, price, priceFs, !!S.qrPrefix,
-                   (big?t.bigBg:t.tagBg), (big?t.bigT:t.tagT));
+                   (big?t.bigBg:t.tagBg), (big?t.bigT:t.tagT), {prev:pvIn, corner:"tr"});
   var tagX=R.x+R.w-inner-tw, tagY=R.y+inner;
   var nameW=Math.max(15, (tagX-inner*0.5)-(R.x+inner));
   var F=fitName(String(p.name||"").toUpperCase(),
@@ -9058,8 +9249,12 @@ document.getElementById("btnAddPage").onclick=function(){
 document.getElementById("btnFit").onclick=function(){ autoFit(false); };
 
 function tplDesc(tp){
-  return (tp.tagPos==="tr"?"Price tag sits at the top right. ":"Price tag sits at the bottom right. ")+
-    (tp.namePos==="bc"?"Product name runs along the bottom, centred.":"Product name sits at the top left.")+
+  var corner={tr:"top right",br:"bottom right",bl:"bottom left",tl:"top left"}[tp.tagPos]||"top right";
+  return "Price tag sits at the "+corner+". "+
+    (tp.namePos==="bc"?"Product name runs along the bottom, centred.":
+     tp.namePos==="bs"?"Product name runs along the bottom, beside the tag.":"Product name sits at the top left.")+
+    (tp.prevIn?" The old price sits inside the tag, crossed out, above the new one — it comes from the old price column, or the price before a corrected sheet.":"")+
+    (tp.dec?" The decimals are drawn small (Name & price → Small decimals).":"")+
     (tp.qr==="block"?" The currency sits in a coloured block beside the price when the currency switch is on.":"")+
     (tp.qr==="in"?" The currency sits above the price inside the badge when the currency switch is on.":"");
 }
@@ -9074,6 +9269,13 @@ function applyTpl(k,keepColours){
     S.theme.bigBg=tp.tag.bg;   S.theme.bigT=tp.tag.fg;
     S.theme.tagBg2=tp.tag.bg2||"";
     S.theme.bandBg=(tp.band&&tp.band.bg)||""; S.theme.bandBg2=(tp.band&&tp.band.bg2)||""; S.theme.bandT=(tp.band&&tp.band.text)||"";
+    S.theme.cardBs=tp.card.bs||"solid"; S.theme.cardBc2=tp.card.bc2||""; S.theme.cardBgd=tp.card.bgd||"d";
+    S.theme.tagLo=(tp.tag&&tp.tag.lo)||"";
+    /* the designs with the old price inside the tag switch the old price on, in their colour */
+    if(tp.prevIn){ S.theme.prevC=tp.prevIn.c; S.showPrev=true; }
+    else delete S.theme.prevC;   /* back to the grey the WAS chip is made for (a white one would vanish) */
+    /* and the new designs come with small decimals */
+    if(tp.dec){ var sd0=S.smallDec||{}; S.smallDec={on:true, size:sd0.size||55, pos:tp.dec}; }
   }
 }
 document.getElementById("tplSel").onchange=function(e){
