@@ -404,6 +404,7 @@ body.exporting .validbar{outline:none}
 .card.bare{background:transparent !important;border:0 !important;box-shadow:none !important}
 /* a shaped box: the outline behind it draws the fill, the stroke and the shadow */
 .card.shaped{background:transparent !important;border:0 !important;box-shadow:none !important}
+.card.sbord{border:0 !important}
 .card.bare .crule{display:none}
 .zoneov{position:absolute;z-index:2;border:1.5px dashed rgba(47,125,255,.55);border-radius:6px;pointer-events:none;box-sizing:border-box}
 .zoneov .zl{position:absolute;left:0;top:-14px;font:700 9px/1 "Segoe UI",system-ui,sans-serif;color:#fff;background:rgba(47,125,255,.85);padding:2px 6px;border-radius:4px;white-space:nowrap}
@@ -1115,6 +1116,15 @@ body.exporting .page{box-shadow:none}
           <div><label>Stroke width</label><select id="cardBw"></select></div>
           <div><label>Corner</label><select id="cardR"></select></div>
         </div>
+        <div class="g2" style="margin-top:8px">
+          <div><label>Stroke style</label>
+          <select id="cardBs"><option value="solid">Solid line</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></div>
+          <div><label>Gradient runs</label>
+          <select id="cardBgd"><option value="h">Left → right</option><option value="v">Top → bottom</option><option value="d">Corner to corner</option></select></div>
+        </div>
+        <label class="inline" style="margin-top:6px"><input type="checkbox" id="cardBgOn">Gradient stroke — from the stroke colour to a second one</label>
+        <div class="swatches" id="cardBc2Box"><div class="sw"><label>Stroke colour 2</label><input type="color" id="c_cardBc2"></div></div>
+        <div class="hint">A dotted stroke with a gradient is the look of the new price-tag designs. A wider stroke (3–6 px) makes bigger dots.</div>
 </div>
 
 <div id="blk_tagcol">
@@ -1988,6 +1998,8 @@ function themeVal(k){
   if(k==="validBg2") return t.validBg||"#a855f7";
   if(k==="validT2")  return "#ffe23d";
   if(k==="tagBg2")   return t.tagBg;
+  if(k==="cardBc2")  return t.cardBc||"#000000";
+  if(k==="tagLo")    return t.tagT||"#ffed00";
   if(k==="bandBg")   return t.tagBg;
   if(k==="bandBg2")  return t.bandBg||t.tagBg;
   if(k==="bandT")    return t.nameC;
@@ -4695,8 +4707,137 @@ function shapeHTML(c){
   return '<svg class="shapesvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+n2(Sh.w)+' '+n2(Sh.h)+
     '" style="position:absolute;left:'+n2(Sh.dx)+'mm;top:'+n2(Sh.dy)+'mm;width:'+n2(Sh.w)+'mm;height:'+n2(Sh.h)+
     'mm;overflow:visible;pointer-events:none;z-index:0'+(f?(';filter:'+f):'')+'"><path d="'+d+'" fill="'+t.cardBg+'"'+
-    (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
-    (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/></svg>';
+    (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+'/></svg>';
+}
+/* ============================== box border ==============================
+   Solid, dashed or dotted, one colour or a gradient between two.  One outline
+   (the box's rounded rectangle, or its shape) and one dash rule drive the
+   screen (an SVG over the box), the SVG export and the PDF, so the dots land
+   in the same places everywhere.  The border sits fully inside a plain box,
+   the way the screen always drew it.                                      */
+function boxBorder(){
+  var t=S.theme, c2=t.cardBc2||"";
+  return {bw:Math.max(0,parseFloat(t.cardBw)||0)/3.78, style:t.cardBs||"solid", c1:t.cardBc||"#000000",
+          c2:(c2 && c2.toLowerCase()!==String(t.cardBc||"").toLowerCase())?c2:"", dir:t.cardBgd||"d"};
+}
+/* the line the border runs along, in mm from the box's top-left corner */
+function borderSegs(c, bw){
+  if(c.shape) return {S2:shapeSegs(c.shape.k,c.shape.w,c.shape.h), ox:c.shape.dx, oy:c.shape.dy, w:c.shape.w, h:c.shape.h};
+  var r=Math.max(0,(parseFloat(S.theme.cardR)||0)/3.78-bw/2), w=Math.max(0.1,c.w-bw), h=Math.max(0.1,c.h-bw);
+  return {S2:segRound(w,h,[r,r,r,r]), ox:bw/2, oy:bw/2, w:w, h:h};
+}
+/* the outline as polylines (curves cut into short straight pieces) */
+function segsFlat(S2){
+  var out=[], cur=null, st=null, px=0, py=0;
+  S2.forEach(function(sg){
+    if(sg[0]==="M"){ cur=[[sg[1],sg[2]]]; out.push(cur); st=[sg[1],sg[2]]; px=sg[1]; py=sg[2]; }
+    else if(sg[0]==="L"){ if(!cur){ cur=[[px,py]]; out.push(cur); } cur.push([sg[1],sg[2]]); px=sg[1]; py=sg[2]; }
+    else if(sg[0]==="C"){
+      if(!cur){ cur=[[px,py]]; out.push(cur); }
+      for(var i=1;i<=12;i++){ var t=i/12, m=1-t;
+        cur.push([m*m*m*px+3*m*m*t*sg[1]+3*m*t*t*sg[3]+t*t*t*sg[5], m*m*m*py+3*m*m*t*sg[2]+3*m*t*t*sg[4]+t*t*t*sg[6]]); }
+      px=sg[5]; py=sg[6];
+    }
+    else if(sg[0]==="Z"){ if(cur && st){ cur.push([st[0],st[1]]); px=st[0]; py=st[1]; } cur=null; }
+  });
+  return out;
+}
+function polyLen(pl){ var L=0; for(var i=1;i<pl.length;i++) L+=Math.hypot(pl[i][0]-pl[i-1][0], pl[i][1]-pl[i-1][1]); return L; }
+/* dots and dashes: a whole number of them, so the pattern closes cleanly */
+function dashSpec(bw, style, L){
+  if(!(L>0)) return null;
+  if(style==="dotted"){ var n=Math.max(4, Math.round(L/(Math.max(bw,0.15)*2.2))); return {dash:0, gap:L/n, cap:"round", n:n}; }
+  if(style==="dashed"){ var n2_=Math.max(4, Math.round(L/Math.max(bw*5,1.2))), p=L/n2_; return {dash:p*0.6, gap:p*0.4, cap:"butt", n:n2_}; }
+  return null;
+}
+/* where along the gradient a point sits, 0..1 — the same rule as SVG's objectBoundingBox */
+function borderGradT(x, y, w, h, dir){
+  var u=w>0?x/w:0, v=h>0?y/h:0;
+  var t=(dir==="h")?u:(dir==="v")?v:(u+v)/2;
+  return Math.max(0, Math.min(1, t));
+}
+/* SVG for the border: the screen overlay (ox,oy = 0) and the SVG export (ox,oy = the box's corner) */
+function borderSVGStr(c, ox, oy){
+  var B=boxBorder(); if(!(B.bw>0) || c.bare) return "";
+  var O=borderSegs(c,B.bw), L=0;
+  segsFlat(O.S2).forEach(function(pl){ L+=polyLen(pl); });
+  var D=dashSpec(B.bw,B.style,L), stroke=B.c1, defs="";
+  if(B.c2){
+    var id="bgr"+(GRADN++);
+    var v=B.dir==="h"?'x1="0" y1="0" x2="1" y2="0"':B.dir==="v"?'x1="0" y1="0" x2="0" y2="1"':'x1="0" y1="0" x2="1" y2="1"';
+    defs='<defs><linearGradient id="'+id+'" '+v+'><stop offset="0" stop-color="'+B.c1+'"/><stop offset="1" stop-color="'+B.c2+'"/></linearGradient></defs>';
+    stroke='url(#'+id+')';
+  }
+  return defs+'<path d="'+segsSVG(O.S2, ox+O.ox, oy+O.oy)+'" fill="none" stroke="'+stroke+'" stroke-width="'+n2(B.bw)+'"'+
+    (D?(' stroke-dasharray="'+n2(D.dash)+' '+n2(D.gap)+'" stroke-linecap="'+D.cap+'"'):'')+' stroke-linejoin="round"/>';
+}
+/* the screen overlay: sits under the photo, over the box fill */
+function borderHTML(c){
+  var inner=borderSVGStr(c,0,0); if(!inner) return "";
+  return '<svg class="bordsvg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+n2(c.w)+' '+n2(c.h)+
+    '" style="position:absolute;left:0;top:0;width:'+n2(c.w)+'mm;height:'+n2(c.h)+'mm;overflow:visible;pointer-events:none;z-index:0">'+inner+'</svg>';
+}
+/* a point that lies a distance d along a polyline */
+function atLen(pl, d){
+  for(var i=1;i<pl.length;i++){
+    var sx=pl[i][0]-pl[i-1][0], sy=pl[i][1]-pl[i-1][1], sl=Math.hypot(sx,sy);
+    if(d<=sl || i===pl.length-1){ var f=sl>0?Math.min(1,Math.max(0,d/sl)):0; return [pl[i-1][0]+sx*f, pl[i-1][1]+sy*f]; }
+    d-=sl;
+  }
+  return pl[pl.length-1];
+}
+/* the part of a polyline between two distances */
+function subPoly(pl, d0, d1){
+  var out=[atLen(pl,d0)], acc=0;
+  for(var i=1;i<pl.length;i++){
+    acc+=Math.hypot(pl[i][0]-pl[i-1][0], pl[i][1]-pl[i-1][1]);
+    if(acc>d0 && acc<d1) out.push(pl[i]);
+  }
+  out.push(atLen(pl,d1));
+  return out;
+}
+/* PDF operators for the border.  X/Y turn mm into points (Y flips the page).
+   One colour: one stroked path with the PDF dash.  A gradient: the same dots
+   and dashes, each coloured by where it sits, grouped into 32 colour steps. */
+function borderPDFOps(c, K, Y, col){
+  var B=boxBorder(); if(!(B.bw>0) || c.bare) return [];
+  var O=borderSegs(c,B.bw), ox=c.x+O.ox, oy=c.y+O.oy;
+  var X=function(v){ return v*K; }, bwPt=B.bw*K, L=0, pls=segsFlat(O.S2);
+  pls.forEach(function(pl){ L+=polyLen(pl); });
+  var D=dashSpec(B.bw,B.style,L);
+  if(!B.c2){
+    var dash=D ? ("["+n2(D.dash*K)+" "+n2(D.gap*K)+"] 0 d "+(D.cap==="round"?"1 J ":"0 J ")) : "";
+    return ["q "+col(B.c1)+" RG "+n2(bwPt)+" w 1 j "+dash+segsPDF(O.S2,ox,oy,X,Y)+" S Q"];
+  }
+  var buckets={}, N=32;
+  var put=function(pts, tx, ty){
+    var b=Math.round(borderGradT(tx,ty,O.w,O.h,B.dir)*(N-1));
+    var s=n2(X(ox+pts[0][0]))+" "+n2(Y(oy+pts[0][1]))+" m";
+    for(var i=1;i<pts.length;i++) s+=" "+n2(X(ox+pts[i][0]))+" "+n2(Y(oy+pts[i][1]))+" l";
+    if(pts.length===1) s+=" "+n2(X(ox+pts[0][0]))+" "+n2(Y(oy+pts[0][1]))+" l";
+    (buckets[b]=buckets[b]||[]).push(s);
+  };
+  pls.forEach(function(pl){
+    var Lp=polyLen(pl); if(!(Lp>0)) return;
+    if(D){
+      var per=D.dash+D.gap, n=Math.max(1,Math.round(Lp/per)), p=Lp/n, dl=D.dash*(p/per);
+      for(var i=0;i<n;i++){
+        var d0=i*p;
+        if(dl<=0.001){ var pt=atLen(pl,d0); put([pt], pt[0], pt[1]); }
+        else { var sp=subPoly(pl,d0,d0+dl), mid=atLen(pl,d0+dl/2); put(sp, mid[0], mid[1]); }
+      }
+    } else {
+      /* a solid gradient line: short overlapping pieces */
+      var step=Math.max(0.8, B.bw*2), m=Math.max(4,Math.ceil(Lp/step)), q=Lp/m;
+      for(var j=0;j<m;j++){ var a=j*q, e=Math.min(Lp,(j+1)*q+q*0.15), mm=atLen(pl,a+q/2); put(subPoly(pl,a,e), mm[0], mm[1]); }
+    }
+  });
+  var cap=(D && D.cap==="butt")?"0 J":"1 J", ops=[];
+  Object.keys(buckets).forEach(function(b){
+    var clr=mixHex(B.c1, B.c2, (+b)/(N-1));
+    ops.push("q "+col(clr)+" RG "+n2(bwPt)+" w "+cap+" 1 j "+buckets[b].join(" ")+" S Q");
+  });
+  return ops;
 }
 /* a little sample for the shape picker: the box, a photo, a name and a price tag */
 function shapeThumb(k){
@@ -5232,10 +5373,12 @@ function cardHTML(p,b,c,L){
   if(bsh) style+='box-shadow:'+bsh+';';
   var shaped=!!(c.shape && !c.bare);
   if(shaped && bsh) style=style.replace('box-shadow:'+bsh+';','');
-  var h='<div class="card'+(c.blank?" blank":"")+(c.sel?" picked":"")+(tup?" tup":"")+(url?"":" nophoto")+(c.bare?" bare":"")+(shaped?" shaped":"")+
+  var bordered=!c.bare && boxBorder().bw>0;       /* the border is an SVG over the box, the same as in the exports */
+  var h='<div class="card'+(c.blank?" blank":"")+(c.sel?" picked":"")+(tup?" tup":"")+(url?"":" nophoto")+(c.bare?" bare":"")+(shaped?" shaped":"")+(bordered?" sbord":"")+
     ((typeof SEL_CARD!=="undefined"&&SEL_CARD===p.id)?" selbox":"")+
     '" data-cat="'+escH(p.category||"")+'" data-id="'+escH(p.id)+'" style="'+style+'">';
   if(shaped) h+=shapeHTML(c);
+  if(bordered) h+=borderHTML(c);
   if(p.__chg && !c.blank) h+='<div class="chgchip chg-'+escH(p.__chg.k)+'" data-a="chg" title="The client changed this in the sheet — click when you have checked it">'+escH(chgLabel(p))+'</div>';
   h+='<div class="cimg"'+(url?' data-img="'+escH(p.id)+'"':'')+' style="'+ist+'">'+
     (url?'':'<div class="ph">'+escH(p.image||"")+'</div>')+
@@ -7200,8 +7343,7 @@ async function buildSVGs(){
           }
         }
         s.push('<path d="'+segsSVG(Sg,sox,soy)+'" fill="'+t.cardBg+'"'+
-          (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
-          (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/>');
+          (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+'/>');
       }
       if(shOn(S.boxSh) && !c.bare && !c.shape){
         var sb=S.boxSh, sc0=(sb.c||"#000000"), sa0=n2(shAlpha(sb));
@@ -7217,8 +7359,8 @@ async function buildSVGs(){
         }
       }
       if(!c.bare && !c.shape) s.push('<rect x="'+n2(c.x)+'" y="'+n2(c.y)+'" width="'+n2(c.w)+'" height="'+n2(c.h)+'" rx="'+n2(rx)+'" fill="'+t.cardBg+'"'+
-        (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+
-        (bw>0?' stroke="'+t.cardBc+'" stroke-width="'+n2(bw)+'"':'')+'/>');
+        (cardAlpha()<1?' fill-opacity="'+n2(cardAlpha())+'"':'')+'/>');
+      if(!c.bare) s.push(borderSVGStr(c, c.x, c.y));
       if(c.band) s.push(polySVG(c.band, c.x, c.y));
       if(c.hasImg){
         var A=await productAsset(c.id);
@@ -7519,19 +7661,15 @@ async function buildVectorPDF(mode){
             CC.push("q /"+gsName(shAlpha(shP))+" gs "+crP+" rg "+segsPDF(PS,pox+pdx,poy+pdy,PX,Y)+" f Q");
         }
         var gaS=(gsCard?("/"+gsCard+" gs "):"");
-        if(bwPt>0.05)
-          CC.push("q "+gaS+col(t.cardBg)+" rg "+col(t.cardBc)+" RG "+n2(bwPt)+" w "+segsPDF(PS,pox,poy,PX,Y)+" B Q");
-        else
-          CC.push("q "+gaS+col(t.cardBg)+" rg "+segsPDF(PS,pox,poy,PX,Y)+" f Q");
+        CC.push("q "+gaS+col(t.cardBg)+" rg "+segsPDF(PS,pox,poy,PX,Y)+" f Q");
       }
       else if(!c.bare){
         boxShadowOps(c).forEach(function(op){ CC.push(op); });
         var ga=(gsCard?("/"+gsCard+" gs "):"");
-        if(bwPt>0.05)
-          CC.push("q "+ga+col(t.cardBg)+" rg "+col(t.cardBc)+" RG "+n2(bwPt)+" w "+rr(cx,cyB,cw,chh,rxPt)+" B Q");
-        else
-          CC.push("q "+ga+col(t.cardBg)+" rg "+rr(cx,cyB,cw,chh,rxPt)+" f Q");
+        CC.push("q "+ga+col(t.cardBg)+" rg "+rr(cx,cyB,cw,chh,rxPt)+" f Q");
       }
+      /* the border: never faded with the box fill (the fill's gs also set /CA) */
+      if(!c.bare) borderPDFOps(c, K, Y, col).forEach(function(op){ CC.push(op); });
       if(c.band) CC.push(polyOp(c.band, c.x, c.y));
 
       if(c.hasImg){
@@ -8509,11 +8647,15 @@ function syncPanel(){
   fillSelect(document.getElementById("priceSz"),
     ["8pt","9pt","9.5pt","10.5pt","12pt","14pt"].map(function(v){return {n:v,v:v};}),S.priceSz);
   fillSelect(document.getElementById("cardBw"),
-    [0,1,1.5,2,3].map(function(v){return {n:v+" px",v:v};}),S.theme.cardBw);
+    [0,1,1.5,2,3,4,6].map(function(v){return {n:v+" px",v:v};}),S.theme.cardBw);
+  document.getElementById("cardBs").value=S.theme.cardBs||"solid";
+  document.getElementById("cardBgd").value=S.theme.cardBgd||"d";
+  document.getElementById("cardBgOn").checked=!!S.theme.cardBc2;
+  document.getElementById("cardBc2Box").style.display=S.theme.cardBc2?"":"none";
   fillSelect(document.getElementById("cardR"),
     [0,2,4,7,12].map(function(v){return {n:v+" px",v:v};}),S.theme.cardR);
-  ["bg1","bg2","bg3","validBg","validBg2","validT","validT2","cardBg","cardBc","nameC","tagBg","tagT","bigBg","bigT",
-  "headBg","headT","arC","prevC","prevBg","tagBg2","bandBg","bandBg2","bandT"].forEach(function(k){
+  ["bg1","bg2","bg3","validBg","validBg2","validT","validT2","cardBg","cardBc","cardBc2","nameC","tagBg","tagT","bigBg","bigT",
+  "headBg","headT","arC","prevC","prevBg","tagBg2","tagLo","bandBg","bandBg2","bandT"].forEach(function(k){
     var el=document.getElementById("c_"+k); if(el) el.value=themeVal(k);
   });
   document.getElementById("validBgMode").value=S.validBgMode;
@@ -8979,6 +9121,15 @@ document.getElementById("nameSz").onchange=function(e){ S.nameSz=e.target.value;
 document.getElementById("priceSz").onchange=function(e){ S.priceSz=e.target.value; snap(); saveState(); render(); };
 document.getElementById("cardBw").onchange=function(e){ S.theme.cardBw=+e.target.value; snap(); saveState(); render(); };
 document.getElementById("cardR").onchange=function(e){ S.theme.cardR=+e.target.value; snap(); saveState(); render(); };
+document.getElementById("cardBs").onchange=function(e){ S.theme.cardBs=e.target.value;
+  if(e.target.value!=="solid" && !(parseFloat(S.theme.cardBw)>0)){ S.theme.cardBw=2; syncPanel(); }   /* a dotted stroke needs a width to show */
+  snap(); saveState(); render(); };
+document.getElementById("cardBgd").onchange=function(e){ S.theme.cardBgd=e.target.value; snap(); saveState(); render(); };
+document.getElementById("cardBgOn").onchange=function(e){
+  S.theme.cardBc2 = e.target.checked ? (S.theme.cardBc2||mixHex(S.theme.cardBc||"#22c1dc","#ffffff",0) ) : "";
+  if(e.target.checked && S.theme.cardBc2.toLowerCase()===String(S.theme.cardBc||"").toLowerCase()) S.theme.cardBc2="#f5d547";
+  if(e.target.checked && !(parseFloat(S.theme.cardBw)>0)) S.theme.cardBw=2;
+  syncPanel(); snap(); saveState(); render(); };
 document.getElementById("bigFrom").onchange=function(e){ S.theme.bigFrom=+e.target.value||0; snap(); saveState(); render(); };
 document.getElementById("qrPrefix").onchange=function(e){ S.qrPrefix=e.target.checked; syncCurUI(); snap(); saveState(); render(); };
 fillSelect(document.getElementById("curSel"), CURRENCIES.map(function(c){ return {n:c.n, v:c.c}; }), "QR");
@@ -9065,8 +9216,8 @@ document.getElementById("validY").onchange=function(e){
 document.getElementById("validX").oninput=function(e){ S.validX=+e.target.value;
   document.getElementById("vxVal").textContent=S.validX; renderSoon(); };
 document.getElementById("validX").onchange=function(){ snap(); saveState(); };
-["bg1","bg2","bg3","validBg","validBg2","validT","validT2","cardBg","cardBc","nameC","tagBg","tagT","bigBg","bigT",
-  "headBg","headT","arC","prevC","prevBg","tagBg2","bandBg","bandBg2","bandT"].forEach(function(k){
+["bg1","bg2","bg3","validBg","validBg2","validT","validT2","cardBg","cardBc","cardBc2","nameC","tagBg","tagT","bigBg","bigT",
+  "headBg","headT","arC","prevC","prevBg","tagBg2","tagLo","bandBg","bandBg2","bandT"].forEach(function(k){
   var el=document.getElementById("c_"+k); if(!el) return;
   el.addEventListener("input",function(){ S.theme[k]=el.value; applyThemeVars(); });
   el.addEventListener("change",function(){ S.theme[k]=el.value; snap(); saveState(); render(); });
@@ -10068,6 +10219,8 @@ var FIND_EXTRA={
   c_tagT:"price text colour",
   cardBw:"box border stroke width",
   cardR:"box corner round radius",
+  cardBs:"stroke style dotted dashed dots border line box outline",
+  cardBgOn:"gradient stroke border two colours dotted",
   bigFrom:"big price colour from",
   decimals:"price decimal format 00 paisa",
   smallDecOn:"small decimals superscript cents paisa smaller .25 raised",
