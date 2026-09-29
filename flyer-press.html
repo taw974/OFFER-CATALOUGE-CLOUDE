@@ -193,6 +193,12 @@ button.danger:hover{background:#1c070d;color:#ff8199;filter:none;
 .pagerow input[type="number"]{width:100%;min-width:0;text-align:center;padding-left:4px;padding-right:4px}
 .bnrow{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink2);margin:6px 0 0 52px}
 .bnrow input{width:auto;margin:0;accent-color:var(--accent)}
+/* one background picture per page */
+.pbgrow{display:flex;align-items:center;gap:6px;margin:6px 0 0 52px}
+.pbgrow .pbt{width:22px;height:31px;flex:none;border-radius:3px;border:1px solid var(--line);
+  background-size:cover;background-position:center;background-repeat:no-repeat}
+.pbgrow select{flex:1 1 0;width:0;min-width:0;padding:5px 6px;font-size:11px;margin:0}
+.pbgrow button{width:auto;flex:0 0 auto;padding:5px 8px;font-size:11px;white-space:nowrap;margin:0}
 .pagerow .pl{font-size:11px;color:var(--ink2);font-weight:600;padding-bottom:9px}
 .pagerow label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pagerow .del{padding:7px 0;background:var(--panel2);border-color:var(--line);color:var(--bad);
@@ -951,6 +957,16 @@ body.exporting .page{box-shadow:none}
           <button class="ghost sm" id="btnAddPage" style="margin-top:10px">+ Add page</button>
           <button class="ghost sm" id="btnFit" style="margin-top:10px">Auto-fit</button>
         </div>
+        <input type="file" id="pageBgFile" accept="image/*" multiple hidden>
+        <label style="margin-top:12px">Background pictures</label>
+        <select id="bgFit">
+          <option value="fill">Fill the page — keep the picture's shape, trim the edges</option>
+          <option value="stretch">Stretch the picture to the page</option>
+        </select>
+        <div class="hint">Every page can have a picture of its own: pick one in the list under the page, or press
+        <b>Upload</b> (pick several and they go on this page and the ones after it). <i>Theme colours</i> goes back
+        to the gradient; <b>All</b> puts that page's picture on every page. A4 artwork is 2480 × 3508 px.
+        The pictures share one library with the cover backgrounds.</div>
 <div id="blk_box">
         <label style="margin-top:14px">Gap between boxes — <span id="gapVal">2</span> mm</label>
         <input type="range" id="gap" min="1" max="8" step="0.5" value="2">
@@ -1297,6 +1313,12 @@ body.exporting .page{box-shadow:none}
           <div class="sw"><label>Card stroke</label><input type="color" id="c_spBc"></div>
           <div class="sw"><label>Name text</label><input type="color" id="c_spName"></div>
         </div>
+        <label style="margin-top:10px">Background picture</label>
+        <div class="pbgrow" style="margin-left:0"><span class="pbt" id="spBgThumb"></span>
+          <select id="spBgImg"></select><button class="ghost sm" id="btnSpBgUp">Upload</button></div>
+        <input type="file" id="spBgFile" accept="image/*" hidden>
+        <div class="hint">One picture behind every single page, filling it (the edges are trimmed to keep its shape).
+        The card sits on top of it.</div>
         <label>Border thickness — <span id="spPadVal">6</span> mm</label>
         <input type="range" id="spPad" min="0" max="40" step="0.5" value="6">
         <label>Card stroke — <span id="spBwVal">0</span> mm</label>
@@ -1610,6 +1632,49 @@ if(typeof FONTDATA!=="undefined"){
   METRICS.poppins=arrW(FONTDATA.poppins.w);
   METRICS.anton=arrW(FONTDATA.anton.w);
 }
+/* The width tables above stop at the plain Latin-1 letters: the dash, the curly
+   quotes, the bullet and the euro (codes 128-159 in a PDF) were 0, so a PDF
+   viewer printed "27–28" with the 28 on top of the dash.  Their real widths
+   are read out of the embedded font itself (its cmap and hmtx tables). */
+var WINHI={128:0x20AC,133:0x2026,145:0x2018,146:0x2019,147:0x201C,148:0x201D,149:0x2022,150:0x2013,151:0x2014,153:0x2122};
+function ttfAdv(u8, cps){
+  var dv=new DataView(u8.buffer, u8.byteOffset, u8.byteLength), n=dv.getUint16(4), T={}, out={};
+  for(var i=0;i<n;i++){ var o=12+i*16; T[String.fromCharCode(u8[o],u8[o+1],u8[o+2],u8[o+3])]=dv.getUint32(o+8); }
+  if(!(T.cmap>=0 && T.hmtx>=0 && T.hhea>=0 && T.head>=0)) return out;
+  var upm=dv.getUint16(T.head+18)||1000, nhm=dv.getUint16(T.hhea+34), cm=T.cmap, sub=0;
+  for(var j=0;j<dv.getUint16(cm+2);j++){
+    var pid=dv.getUint16(cm+4+j*8), eid=dv.getUint16(cm+6+j*8), off=dv.getUint32(cm+8+j*8);
+    if(dv.getUint16(cm+off)===4 && ((pid===3&&eid===1)||pid===0)){ sub=cm+off; if(pid===3) break; }
+  }
+  if(!sub) return out;
+  var sx2=dv.getUint16(sub+6), ends=sub+14, starts=ends+sx2+2, deltas=starts+sx2, ranges=deltas+sx2;
+  function gid(c){
+    for(var k=0;k<sx2/2;k++){
+      if(c>dv.getUint16(ends+k*2)) continue;
+      var st=dv.getUint16(starts+k*2); if(c<st) return 0;
+      var d=dv.getInt16(deltas+k*2), ro=dv.getUint16(ranges+k*2);
+      if(!ro) return (c+d)&0xFFFF;
+      var g=dv.getUint16(ranges+k*2+ro+(c-st)*2); return g?((g+d)&0xFFFF):0;
+    }
+    return 0;
+  }
+  cps.forEach(function(c){ var g=gid(c); if(g) out[c]=Math.round(dv.getUint16(T.hmtx+Math.min(g,nhm-1)*4)*1000/upm); });
+  return out;
+}
+if(typeof FONTDATA!=="undefined") Object.keys(FONTDATA).forEach(function(k){
+  var fd=FONTDATA[k]; if(!fd || !fd.w || !fd.b64) return;
+  try{
+    var A=ttfAdv(b64u8(fd.b64), Object.keys(WINHI).map(function(c){ return WINHI[c]; }));
+    Object.keys(WINHI).forEach(function(code){
+      var u=WINHI[code], wv=A[u]; if(!wv) return;
+      if(!fd.w[code-32]) fd.w[code-32]=wv;
+      if(METRICS[k]) METRICS[k][String.fromCharCode(u)]=wv;
+    });
+  }catch(e){}
+});
+/* Helvetica-Bold's own widths for the same marks */
+(function(){ var h={"\u2013":556,"\u2014":1000,"\u2018":278,"\u2019":278,"\u201C":500,"\u201D":500,"\u2026":1000,"\u2022":350,"\u2122":1000,"\u20AC":556};
+  for(var c in h) if(!HELVW[c]) HELVW[c]=h[c]; })();
 var FONTS = [
   {n:"Poppins (built in)", v:'"PoppinsE", Arial, sans-serif',            m:"poppins"},
   {n:"Anton (built in)",   v:'"AntonE", Impact, sans-serif',             m:"anton"},
@@ -3147,7 +3212,9 @@ function ensureRoom(){
   if(!S.pagesUser) autoFit(true);
   while(over()>0 && guard++<12){
     var last=S.pages[S.pages.length-1]||{cols:7,rows:8};
-    S.pages.push({cols:last.cols, rows:last.rows, extra:0});
+    var nx={cols:last.cols, rows:last.rows, extra:0};
+    if(last.bg) nx.bg=last.bg;                   /* and a new page looks like the one before it */
+    S.pages.push(nx);
     grew++;
     if(!S.pagesUser) autoFit(true);
   }
@@ -3201,6 +3268,7 @@ function autoFit(quiet){
     var keep=S.pages[i+off]||{};
     S.pages[i+off]={cols:best.c, rows:(i===0?best.r1:best.r2),
                 extra:(i===np-1?best.extra:0), banner:keep.banner};
+    if(keep.bg) S.pages[i+off].bg=keep.bg;      /* the page keeps its picture */
   }
   syncPanel(); paintPageList(); snap(); saveState(); render();
   if(!quiet) alert("Grid set to "+best.cap+" boxes for "+n+" products ("+
@@ -4543,7 +4611,7 @@ async function cutBackground(file, tol, force){
    A 3000px product shot is decoded on every redraw and re-encoded on every
    export.  Nothing on an A4 sheet needs more than about 1200px, and cutting
    to that is what makes the flyer feel quick.                              */
-async function shrinkBlob(file, maxSide){
+async function shrinkBlob(file, maxSide, jpegOk){
   try{
     if(!maxSide || !file || (file.type && file.type.indexOf("image/")!==0)) return file;
     var url=URL.createObjectURL(file), im=new Image();
@@ -4558,7 +4626,15 @@ async function shrinkBlob(file, maxSide){
     var cx=cv.getContext("2d");
     cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality="high";
     cx.drawImage(im,0,0,nw,nh);
-    var bl=await new Promise(function(r){ cv.toBlob(r,"image/png"); });
+    /* a picture with no see-through part is a photograph or flat artwork: as a
+       JPEG it is a fraction of the size, where a PNG re-encode rarely wins */
+    var kind="image/png";
+    if(jpegOk){
+      var solid=true;
+      try{ var dd=cx.getImageData(0,0,nw,nh).data; for(var ai=3;ai<dd.length;ai+=4) if(dd[ai]<255){ solid=false; break; } }catch(e){ solid=false; }
+      if(solid) kind="image/jpeg";
+    }
+    var bl=await new Promise(function(r){ if(kind==="image/jpeg") cv.toBlob(r,kind,0.9); else cv.toBlob(r,kind); });
     return (bl && bl.size<file.size) ? bl : file;
   }catch(e){ return file; }
 }
@@ -5276,32 +5352,86 @@ function paintTplGallery(){
 
 /* ---------------------------- cover panel ---------------------------- */
 function coverId(){ return "c"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36); }
-async function addCoverFiles(files){
-  var list=[].slice.call(files||[]), done=0;
+/* Puts pictures into the background library (the cover's and the pages') and
+   gives back their ids, in the order they were picked. */
+async function storeBgFiles(files){
+  var list=[].slice.call(files||[]), ids=[];
   for(var i=0;i<list.length;i++){
     var f=list[i]; if(!/^image\//.test(f.type)) continue;
     busy("Adding background "+(i+1)+" of "+list.length+"…", f.name);
     var blob=f;
-    try{ blob=await shrinkBlob(f, 2600); }catch(e){}
+    try{ blob=await shrinkBlob(f, 2600, true); }catch(e){}
     var id=coverId();
     try{ await DB.put("meta","cbg:"+id, blob); }catch(e){ busyOff(); alert("Could not store "+f.name+".\n\n"+(e&&e.message||e)); continue; }
     COVERURL[id]=URL.createObjectURL(blob);
     S.covers=S.covers||[]; S.covers.push({id:id, name:f.name.replace(/\.[a-z0-9]+$/i,"")});
-    if(!S.cover.bg) S.cover.bg=id;
-    done++;
+    ids.push(id);
   }
   busyOff();
-  if(done){ if(!S.cover.on){ S.cover.on=true; if(!S.cover.zones.length) S.cover.zones=defaultZones(); }
-    coverChanged(); toast(done+" background(s) added."); }
+  return ids;
+}
+async function addCoverFiles(files){
+  var ids=await storeBgFiles(files);
+  if(!ids.length) return;
+  if(!S.cover.bg) S.cover.bg=ids[0];
+  if(!S.cover.on){ S.cover.on=true; if(!S.cover.zones.length) S.cover.zones=defaultZones(); }
+  coverChanged(); toast(ids.length+" background(s) added.");
 }
 async function removeCover(id){
-  if(!confirm("Remove this background from the library?")) return;
-  try{ await DB.delete("meta","cbg:"+id); }catch(e){}
+  if(!confirm("Remove this background from the library?\n\nEvery page and cover that uses it goes back to the theme colours.")) return;
+  try{ await DB.del("meta","cbg:"+id); }catch(e){}
+  try{ URL.revokeObjectURL(COVERURL[id]); }catch(e){}
   delete COVERURL[id];
   S.covers=(S.covers||[]).filter(function(c){ return c.id!==id; });
   if(S.cover.bg===id) S.cover.bg="";
-  Object.keys(S.ws||{}).forEach(function(k){ var w=S.ws[k]; if(w && w.cover && w.cover.bg===id) w.cover.bg=""; });
-  snap(); saveState(); paintCover(); render();
+  function unpage(L){ (L||[]).forEach(function(pg){ if(pg && pg.bg===id) delete pg.bg; }); }
+  unpage(S.pages);
+  Object.keys(S.ws||{}).forEach(function(k){ var w=S.ws[k]; if(!w) return;
+    if(w.cover && w.cover.bg===id) w.cover.bg="";
+    unpage(w.pages); });
+  if(S.sp && S.sp.bgImg===id) S.sp.bgImg="";
+  snap(); saveState(); paintCover(); paintPageList(); try{ syncSpBg(); }catch(e){} render();
+}
+/* ---- a background picture on a page ---- */
+function bgFitMode(){ return (S.theme && S.theme.bgFit==="stretch") ? "stretch" : "fill"; }
+/* where a W x H picture goes on a page: stretched over it, or scaled to cover it
+   and centred, the overflow trimmed (the same rule for the screen, SVG and PDF) */
+function bgPlace(aw, ah, W, H, mode){
+  if(mode==="stretch" || !(aw>0) || !(ah>0)) return {x:0, y:0, w:W, h:H};
+  var sc=Math.max(W/aw, H/ah);
+  return {x:(W-aw*sc)/2, y:(H-ah*sc)/2, w:aw*sc, h:ah*sc};
+}
+/* the CSS layer for it, drawn over the page's own colours */
+function bgLayerCss(id, mode){
+  var u=id && COVERURL[id]; if(!u) return "";
+  return "url("+u+") "+(mode==="stretch" ? "0 0/100% 100%" : "center/cover")+" no-repeat";
+}
+/* page 1 of a flyer with a cover takes the cover's picture */
+function pageBgGet(i){
+  if(i===0 && coverOn()) return (S.cover && S.cover.bg) || "";
+  var pg=S.pages[i]; return (pg && pg.bg && COVERURL[pg.bg]) ? pg.bg : "";
+}
+function pageBgSet(i, id){
+  if(i===0 && coverOn()){ S.cover.bg=id||""; return; }
+  var pg=S.pages[i]; if(!pg) return;
+  if(id) pg.bg=id; else delete pg.bg;
+}
+function bgOptions(cur){
+  return '<option value="">Theme colours</option>'+(S.covers||[]).map(function(c){
+    return '<option value="'+escH(c.id)+'"'+(c.id===cur?" selected":"")+'>'+escH(c.name)+'</option>'; }).join("");
+}
+function bgThumbCss(id){
+  var t=S.theme||{};
+  return (id && COVERURL[id]) ? "background-image:url("+COVERURL[id]+")"
+    : "background:linear-gradient(158deg,"+t.bg1+" 0%,"+(t.bgMode==="solid"?t.bg1:t.bg2)+" 52%,"+(t.bgMode==="solid"?t.bg1:t.bg3)+" 100%)";
+}
+function syncSpBg(){
+  var sel=document.getElementById("spBgImg"); if(!sel) return;
+  var cur=(S.sp && S.sp.bgImg && COVERURL[S.sp.bgImg]) ? S.sp.bgImg : "";
+  sel.innerHTML=bgOptions(cur); sel.value=cur;
+  var th=document.getElementById("spBgThumb");
+  if(th) th.setAttribute("style", cur ? "background-image:url("+COVERURL[cur]+")"
+    : "background:linear-gradient(90deg,"+S.sp.bg1+","+(S.sp.bgMode==="solid"?S.sp.bg1:S.sp.bg2)+")");
 }
 function paintCover(){
   var C=S.cover||defCover(); S.cover=C;
@@ -5320,7 +5450,7 @@ function paintCover(){
       el.onclick=function(e){
         var x=e.target.getAttribute&&e.target.getAttribute("data-x");
         if(x){ e.stopPropagation(); removeCover(x); return; }
-        C.bg=el.getAttribute("data-id")||""; snap(); saveState(); paintCover(); render();
+        C.bg=el.getAttribute("data-id")||""; snap(); saveState(); paintCover(); paintPageList(); render();
       };
     });
   }
@@ -5471,7 +5601,9 @@ function pageHTML(idx,items,b,P,L){
         (S.cover.edit?'<i class="zh tl"></i><i class="zh tr"></i><i class="zh bl"></i><i class="zh br"></i>':'')+'</div>';
     });
   }
-  var pstyle=P.coverBg&&COVERURL[P.coverBg]?' style="background-image:url('+COVERURL[P.coverBg]+');background-size:100% 100%"':"";
+  /* the picture goes over the theme colours, as in the SVG and PDF, so a see-through one shows them */
+  var bgL=P.coverBg ? bgLayerCss(P.coverBg, bgFitMode()) : "";
+  var pstyle=bgL ? ' style="background:'+bgL+', linear-gradient(158deg,var(--bg1) 0%,var(--bg2) 52%,var(--bg3) 100%)"' : "";
   var badge=P.cover?('COVER &middot; '+(P.zones||[]).length+' zones &middot; '+filled+' products'):
     (cols+' × '+rows+(ex?(' + '+ex):'')+' = '+(cols*rows+ex)+' boxes &middot; '+filled+' filled');
   return '<div class="page'+(P.cover?" cover":"")+'"'+pstyle+'>'+
@@ -7341,7 +7473,7 @@ function computeLayout(){
     pages.push({hdr:hdr, bgap:bgap, top:topPad, valid:(i===0&&S.showValid)?b.valid:null,
                 cards:cards, heads:heads, cols:cols, rows:pg.rows, extra:pgExtra(pg),
                 cap:CA&&i===0?CA.count:n, rowsUsed:nR, rowH:ch, cover:CA&&i===0, zones:zonesOut,
-                coverBg:(CA&&i===0&&S.cover.bg)?S.cover.bg:""});
+                coverBg:(CA&&i===0) ? (S.cover.bg||"") : ((pg.bg&&COVERURL[pg.bg])?pg.bg:"")});
   }
   return {pages:pages, theme:t, tpl:tp, qrOn:qrOn, nameFs:nameFs, priceFs:priceFs,
     namePt:parseFloat(S.nameSz), pricePt:parseFloat(S.priceSz), cells:cells};
@@ -7472,7 +7604,8 @@ async function buildSVGs(){
     }
     if(P.coverBg && !S.bareExport){
       var CBA=await coverAsset(P.coverBg);
-      if(CBA) s.push('<image x="0" y="0" width="210" height="297" preserveAspectRatio="none" xlink:href="'+CBA.dataURL+'"/>');
+      if(CBA) s.push('<image x="0" y="0" width="210" height="297" preserveAspectRatio="'+
+        (bgFitMode()==="stretch"?"none":"xMidYMid slice")+'" xlink:href="'+CBA.dataURL+'"/>');
     }
     if(P.hdr>0 && !S.bareExport){
       if(BA===null) BA=await bannerAsset()||false;
@@ -7739,7 +7872,9 @@ async function buildVectorPDF(mode){
 
     if(P.coverBg && !S.bareExport && !boxes){
       var CBP=await coverAsset(P.coverBg);
-      if(CBP){ var xc=xobj(CBP); used[xc.name]=xc.id; C.push("q "+n2(W)+" 0 0 "+n2(H)+" 0 0 cm /"+xc.name+" Do Q"); }
+      if(CBP){ var xc=xobj(CBP); used[xc.name]=xc.id;
+        var bpP=bgPlace(CBP.w, CBP.h, W, H, bgFitMode());
+        C.push("q 0 0 "+n2(W)+" "+n2(H)+" re W n "+n2(bpP.w)+" 0 0 "+n2(bpP.h)+" "+n2(bpP.x)+" "+n2(bpP.y)+" cm /"+xc.name+" Do Q"); }
     }
     if(P.hdr>0 && !S.bareExport && !boxes){
       if(BA===null) BA=await bannerAsset()||false;
@@ -8278,8 +8413,9 @@ function slotHTML(p,R){
 }
 function singleHTML(group,i){
   var F=spFrame(), sp=S.sp;
+  var spL=(sp.bgImg ? bgLayerCss(sp.bgImg, "fill") : "");
   var h='<div class="spage" data-i="'+i+'" style="width:'+n2(F.page.w)+'mm;height:'+n2(F.page.h)+
-    'mm;background:'+spBackground()+'">';
+    'mm;background:'+(spL ? spL+", " : "")+spBackground()+'">';
   if(F.hdr>0) h+='<div class="sbanner" style="height:'+n2(F.hdr)+'mm">'+
     (SPBANNERS[S.branch]?'<img src="'+SPBANNERS[S.branch]+'" alt="">':'')+'</div>';
   if(sp.showMark) h+='<div class="smark">'+escH(BRANCHES[S.branch].name)+'</div>';
@@ -8563,12 +8699,18 @@ async function buildSinglePDF(){
       " /Length "+a.jpeg.length+" >>", a.jpeg);
     xmap[a.__k]={id:id,name:"Im"+(++xi)}; return xmap[a.__k];
   }
-  var BA=null, parent=reserve(), pageIds=[];
+  var BA=null, SBG=null, parent=reserve(), pageIds=[];
   for(var gi=0; gi<gs.length; gi++){
     busy("Building the pages…", (gi+1)+" of "+gs.length);
     var group=gs[gi], C=[], used={};
     if(sh) C.push("q 0 0 "+n2(W)+" "+n2(H)+" re W n /Sh0 sh Q");
     else C.push(col(sp.bg1)+" rg 0 0 "+n2(W)+" "+n2(H)+" re f");
+    if(sp.bgImg && COVERURL[sp.bgImg]){
+      if(SBG===null) SBG=await coverAsset(sp.bgImg)||false;
+      if(SBG){ var xg=xobj(SBG); used[xg.name]=xg.id;
+        var bpS=bgPlace(SBG.w, SBG.h, W, H, "fill");
+        C.push("q 0 0 "+n2(W)+" "+n2(H)+" re W n "+n2(bpS.w)+" 0 0 "+n2(bpS.h)+" "+n2(bpS.x)+" "+n2(bpS.y)+" cm /"+xg.name+" Do Q"); }
+    }
     if(F.hdr>0 && SPBANNERS[S.branch]){
       if(BA===null) BA=await spBannerAsset()||false;
       if(BA){
@@ -8717,8 +8859,30 @@ function paintPageList(){
        '<button class="del" data-del="'+i+'" title="Delete this page"'+(S.pages.length<2?" disabled":"")+'>×</button>'+
        '</div>'+
        '<label class="bnrow"><input type="checkbox" data-bn="'+i+'"'+(bannerOn(i)?" checked":"")+'>Header banner on this page</label>';
+    var bgi=pageBgGet(i), isCov=(i===0 && coverOn());
+    h+='<div class="pbgrow" title="'+(isCov?"The cover's background — the same as in the Cover page section":"Background picture for page "+(i+1))+'">'+
+       '<span class="pbt" style="'+bgThumbCss(bgi)+'"></span>'+
+       '<select data-pbg="'+i+'">'+bgOptions(bgi)+'</select>'+
+       '<button class="ghost sm" data-pbup="'+i+'">Upload</button>'+
+       ((S.pages.length>1 && !isCov)?'<button class="ghost sm" data-pball="'+i+'" title="Put this picture (or the theme colours) on every page — a cover keeps its own">All</button>':'')+
+       '</div>';
   }
   el.innerHTML=h;
+  [].forEach.call(el.querySelectorAll("select[data-pbg]"),function(sel){
+    sel.onchange=function(){ var i=+sel.getAttribute("data-pbg");
+      pageBgSet(i, sel.value); snap(); saveState();
+      if(i===0 && coverOn()) paintCover();
+      paintPageList(); render(); };
+  });
+  [].forEach.call(el.querySelectorAll("button[data-pbup]"),function(b){
+    b.onclick=function(){ PBG_TARGET=+b.getAttribute("data-pbup"); document.getElementById("pageBgFile").click(); };
+  });
+  [].forEach.call(el.querySelectorAll("button[data-pball]"),function(b){
+    b.onclick=function(){ var id=pageBgGet(+b.getAttribute("data-pball"));
+      for(var j=0;j<S.pages.length;j++) if(!(j===0 && coverOn())) pageBgSet(j, id);
+      snap(); saveState(); paintPageList(); render();
+      toast(id ? "That picture is on every page now." : "Every page is back on the theme colours."); };
+  });
   /* Typing into these boxes used to fight back: the value was clamped on every
      keystroke, so a half-typed number was rewritten before you finished it.
      Now the field is left alone while you type and only settled when you leave
@@ -8777,6 +8941,7 @@ function syncPanel(){
   document.getElementById("branch").value=S.branch;
   document.getElementById("branchName").value=BRANCHES[S.branch].name;
   document.getElementById("bgMode").value=S.theme.bgMode||"gradient";
+  document.getElementById("bgFit").value=bgFitMode();
   document.getElementById("bg1Label").textContent=(S.theme.bgMode==="solid")?"Fill":"Top";
   document.getElementById("validText").value=BRANCHES[S.branch].valid;
   document.getElementById("validDate").value=S.validDate||"";
@@ -9244,9 +9409,29 @@ document.getElementById("headerPct").oninput=function(e){ S.headerPct=+e.target.
   renderSoon(); };
 document.getElementById("headerPct").onchange=function(){ snap(); saveState(); };
 document.getElementById("btnAddPage").onclick=function(){
-  var last=S.pages[S.pages.length-1];
-  S.pages.push({cols:last.cols,rows:last.rows}); paintPageList(); snap(); saveState(); render(); };
+  var last=S.pages[S.pages.length-1], nx={cols:last.cols,rows:last.rows};
+  if(last.bg) nx.bg=last.bg;
+  S.pages.push(nx); paintPageList(); snap(); saveState(); render(); };
 document.getElementById("btnFit").onclick=function(){ autoFit(false); };
+var PBG_TARGET=0;
+document.getElementById("pageBgFile").onchange=async function(e){
+  var files=e.target.files, at=PBG_TARGET; 
+  var ids=await storeBgFiles(files); e.target.value="";
+  if(!ids.length) return;
+  /* several pictures: this page and the ones after it, one each */
+  for(var k=0;k<ids.length && at+k<S.pages.length;k++) pageBgSet(at+k, ids[k]);
+  snap(); saveState(); paintCover(); paintPageList(); render();
+  toast(ids.length===1 ? "Background set on page "+(at+1)+"." :
+    ids.length+" backgrounds added from page "+(at+1)+" on.");
+};
+document.getElementById("bgFit").onchange=function(e){ S.theme.bgFit=e.target.value; snap(); saveState(); render(); };
+document.getElementById("spBgImg").onchange=function(e){ S.sp.bgImg=e.target.value||""; syncSpBg(); spTouch(); };
+document.getElementById("btnSpBgUp").onclick=function(){ document.getElementById("spBgFile").click(); };
+document.getElementById("spBgFile").onchange=async function(e){
+  var ids=await storeBgFiles(e.target.files); e.target.value="";
+  if(!ids.length) return;
+  S.sp.bgImg=ids[0]; syncSpBg(); paintCover(); paintPageList(); spTouch();
+};
 
 function tplDesc(tp){
   var corner={tr:"top right",br:"bottom right",bl:"bottom left",tl:"top left"}[tp.tagPos]||"top right";
@@ -9556,6 +9741,7 @@ function syncSingle(){
   document.getElementById("c_spCard").value=sp.cardBg;
   document.getElementById("c_spBc").value=sp.cardBc;
   document.getElementById("c_spName").value=sp.nameC;
+  syncSpBg();
   document.getElementById("spPad").value=sp.pad;    document.getElementById("spPadVal").textContent=sp.pad;
   document.getElementById("spHdr").value=sp.hdrPct; document.getElementById("spHdrVal").textContent=sp.hdrPct;
   document.getElementById("spR").value=sp.cardR;    document.getElementById("spRVal").textContent=sp.cardR;
@@ -9937,6 +10123,7 @@ async function openProject(file){
     IMAGES.clear();
     Object.keys(BANNERS).forEach(function(k){ delete BANNERS[k]; });
     Object.keys(SPBANNERS).forEach(function(k){ delete SPBANNERS[k]; });
+    Object.keys(COVERURL).forEach(function(k){ try{URL.revokeObjectURL(COVERURL[k]);}catch(e){} delete COVERURL[k]; });
     ASSET={}; ARCACHE={}; clearCuts();
     /* in with the new */
     var man=proj.man||{images:[],metas:[]};
@@ -10401,9 +10588,11 @@ var FIND_EXTRA={
   cardOp:"box transparency opacity soft tint fill strength",
   showValid:"offer valid bar show hide",
   btnAddPage:"page add new",
+  bgFit:"background picture image page upload own photo wallpaper fill stretch",
+  spBgImg:"single page background picture image upload",
   btnFit:"auto fit grid rows columns",
   tplSel:"price tag design template style ribbon badge flag",
-  tplGal:"price tag design template style gallery starburst slanted split bar",
+  tplGal:"price tag design template style gallery starburst slanted split bar heart circle half quarter corner pill old price inside",
   qrPrefix:"currency qr riyal dollar euro price tag label money symbol",
   curSel:"currency country riyal dirham dollar euro rupee taka",
   curText:"currency custom label symbol code",
