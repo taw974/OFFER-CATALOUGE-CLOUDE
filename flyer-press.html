@@ -251,7 +251,9 @@ body.exporting .spage{box-shadow:none}
 #mapper{border-top:1px solid var(--line);margin-top:11px;padding-top:4px;display:none}
 
 /* ============================ CANVAS ============================ */
-#stage{margin-left:340px;padding:28px;display:flex;flex-direction:column;align-items:center;gap:24px}
+#stage{margin-left:340px;padding:28px 28px 140px;display:flex;flex-direction:column;align-items:center;gap:24px}
+/* (the room at the bottom lets the last row scroll clear of the zoom buttons, which sat
+   over the last box's price so it could be neither read nor clicked) */
 /* the flyer zooms on its own — the panel never moves (Ctrl+wheel, Ctrl + / -) */
 #zoombar{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;align-items:center;gap:4px;
   padding:5px 6px;border-radius:12px;background:rgba(14,17,22,.92);border:1px solid rgba(255,255,255,.12);
@@ -6510,7 +6512,19 @@ async function deleteProduct(id){
   var p=findItem(id); if(!p) return;
   var L=listFor(id), i=L.indexOf(p); if(i<0) return;
   if(IMAGES.get(id)){ var before=await grabImage(id); await dropImage(id); noteImage(id, before, null); }
+  /* "each product keeps its serial number": the box of a deleted product stayed on the
+     flyer as an empty UPLOAD box.  A deleted box is gone - the ones after it move up. */
+  var slotGone=0;
+  if(S.mode==="data" && S.slotMode==="serial"){
+    if(L===S.blanks) slotGone=i+1;
+    else { var sl=slotOf(p); if(sl>0 && !S.products.some(function(q){ return q!==p && slotOf(q)===sl; })) slotGone=sl; }
+  }
   L.splice(i,1);
+  if(slotGone){
+    if(L!==S.blanks && S.blanks.length>=slotGone) S.blanks.splice(slotGone-1,1);
+    S.products.forEach(function(q){ var n=slotOf(q); if(n>slotGone) q.slot=n-1; });
+    if(S.maxSlot>=slotGone) S.maxSlot=Math.max(0,S.maxSlot-1);
+  }
   if(SEL_CARD===id) SEL_CARD=null;
   snap(); saveState(); render();
   toast("“"+p.name+"” removed.  Ctrl+Z brings it back.");
@@ -6994,9 +7008,13 @@ function serialCells(){
   if(S.maxSlot>maxSlot) maxSlot=S.maxSlot;
   if(!maxSlot) return [];
   ensureBlanks(maxSlot);
+  /* a hidden product leaves no empty box behind (it used to print as a blank one) */
+  var hiddenAt={};
+  if(!S.showHidden) S.products.forEach(function(p){ if(!p.show){ var n=slotOf(p); if(n>0 && !byslot[n]) hiddenAt[n]=1; } });
   var out=[];
   for(var i=1;i<=maxSlot;i++){
     var p=byslot[i];
+    if(!p && hiddenAt[i]) continue;
     if(p && !isPlaceholder(p) && String(p.prices[col]||"").trim()!=="") out.push({p:p});
     else out.push({p:S.blanks[i-1]});
   }
