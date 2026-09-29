@@ -7720,19 +7720,6 @@ async function buildSVGs(){
           escX(AR_FONT)+'" font-size="'+n2(c.ar.fs)+'" font-weight="bold" fill="'+
           (t.arC||t.nameC)+'">'+escX(c.ar.t)+'</text>');
       }
-      if(c.prev){
-        var PVs=c.prev, pc=(t.prevC||"#9aa3ad");
-        if(PVs.chip) s.push('<rect x="'+n2(PVs.chip.x)+'" y="'+n2(PVs.chip.y)+'" width="'+n2(PVs.chip.w)+
-          '" height="'+n2(PVs.chip.h)+'" rx="'+n2(PVs.chip.r)+'" fill="'+(t.prevBg||"#ffffff")+'"/>');
-        if(PVs.label) s.push('<text x="'+n2(PVs.label.x)+'" y="'+n2(PVs.label.y)+'" font-family="'+
-          fstack(S.fontPrice||S.font)+'" font-size="'+n2(PVs.label.fs)+'" font-weight="bold" fill="'+pc+'">'+
-          escX(PVs.label.t)+'</text>');
-        s.push('<text x="'+n2(PVs.x)+'" y="'+n2(PVs.y)+'" font-family="'+
-          fstack(S.fontPrice||S.font)+'" font-size="'+n2(PVs.fs)+'" font-weight="bold" fill="'+pc+'">'+
-          escX(PVs.t)+'</text>');
-        if(PVs.strike) s.push('<rect x="'+n2(PVs.x)+'" y="'+n2(PVs.y-PVs.fs*0.30)+'" width="'+
-          n2(PVs.w)+'" height="'+n2(Math.max(0.16,PVs.fs*0.09))+'" fill="'+pc+'"/>');
-      }
       if(c.price!==""){
         var G=c.tag.geom, ox=c.x+c.tag.x, oy=c.y+c.tag.y;
         G.polys.forEach(function(Pg){ s.push(polySVG(Pg,ox,oy)); });
@@ -7745,6 +7732,20 @@ async function buildSVGs(){
           s.push('<text x="'+n2(ox+R.x)+'" y="'+n2(oy+R.y)+'" font-family="'+fstack(S.fontPrice||S.font)+
             '" font-size="'+n2(R.size)+'" font-weight="bold" text-anchor="'+R.anchor+
             '" fill="'+PR.fill+'">'+escX(R.t)+'</text>'); });
+      }
+      /* the old price goes over the tag, as on screen, where it can be dragged onto it */
+      if(c.prev){
+        var PVs=c.prev, pc=(t.prevC||"#9aa3ad");
+        if(PVs.chip) s.push('<rect x="'+n2(PVs.chip.x)+'" y="'+n2(PVs.chip.y)+'" width="'+n2(PVs.chip.w)+
+          '" height="'+n2(PVs.chip.h)+'" rx="'+n2(PVs.chip.r)+'" fill="'+(t.prevBg||"#ffffff")+'"/>');
+        if(PVs.label) s.push('<text x="'+n2(PVs.label.x)+'" y="'+n2(PVs.label.y)+'" font-family="'+
+          fstack(S.fontPrice||S.font)+'" font-size="'+n2(PVs.label.fs)+'" font-weight="bold" fill="'+pc+'">'+
+          escX(PVs.label.t)+'</text>');
+        s.push('<text x="'+n2(PVs.x)+'" y="'+n2(PVs.y)+'" font-family="'+
+          fstack(S.fontPrice||S.font)+'" font-size="'+n2(PVs.fs)+'" font-weight="bold" fill="'+pc+'">'+
+          escX(PVs.t)+'</text>');
+        if(PVs.strike) s.push('<rect x="'+n2(PVs.x)+'" y="'+n2(PVs.y-PVs.fs*0.30)+'" width="'+
+          n2(PVs.w)+'" height="'+n2(Math.max(0.16,PVs.fs*0.09))+'" fill="'+pc+'"/>');
       }
       if(grp) s.push('</g>');
     }
@@ -8039,19 +8040,6 @@ async function buildVectorPDF(mode){
           CC.push("q "+n2(AA.__wmm*K)+" 0 0 "+n2(AA.__hmm*K)+" "+n2(ax)+" "+n2(ay)+" cm /"+axo.name+" Do Q");
         }
       }
-      if(c.prev){
-        var PVp=c.prev, pcp=col(t.prevC||"#9aa3ad");
-        if(PVp.chip) CC.push(col(t.prevBg||"#ffffff")+" rg "+
-          rr(PVp.chip.x*K, Y(PVp.chip.y+PVp.chip.h), PVp.chip.w*K, PVp.chip.h*K, PVp.chip.r*K)+" f");
-        if(PVp.label) CC.push(txtOp(PVp.label.t, FP.res, pmk, PVp.label.fs/0.3528, pcp,
-          PVp.label.x*K, Y(PVp.label.y), "start"));
-        CC.push(txtOp(PVp.t, FP.res, pmk, PVp.fs/0.3528, pcp, PVp.x*K, Y(PVp.y), "start"));
-        if(PVp.strike){
-          var sh2=Math.max(0.16,PVp.fs*0.09);
-          CC.push(pcp+" rg "+n2(PVp.x*K)+" "+n2(Y(PVp.y-PVp.fs*0.30+sh2))+" "+
-            n2(PVp.w*K)+" "+n2(sh2*K)+" re f");
-        }
-      }
       if(c.badge){
         var bdx=c.x+c.badge.x, bdy=c.y+c.badge.y;
         c.badge.geom.polys.forEach(function(P){ CC.push(polyOp(P,bdx,bdy)); });
@@ -8070,11 +8058,26 @@ async function buildVectorPDF(mode){
           CC.push(txtOp(R.t, FP.res, pmk, R.size/0.3528, col(PR.fill), (ox+R.x)*K, Y(oy+R.y), R.anchor)); });
       }
 
+      /* the old price over the tag, as on screen */
+      if(c.prev){
+        var PVp=c.prev, pcp=col(t.prevC||"#9aa3ad");
+        if(PVp.chip) CC.push(col(t.prevBg||"#ffffff")+" rg "+
+          rr(PVp.chip.x*K, Y(PVp.chip.y+PVp.chip.h), PVp.chip.w*K, PVp.chip.h*K, PVp.chip.r*K)+" f");
+        if(PVp.label) CC.push(txtOp(PVp.label.t, FP.res, pmk, PVp.label.fs/0.3528, pcp,
+          PVp.label.x*K, Y(PVp.label.y), "start"));
+        CC.push(txtOp(PVp.t, FP.res, pmk, PVp.fs/0.3528, pcp, PVp.x*K, Y(PVp.y), "start"));
+        if(PVp.strike){
+          var sh2=Math.max(0.16,PVp.fs*0.09);
+          CC.push(pcp+" rg "+n2(PVp.x*K)+" "+n2(Y(PVp.y-PVp.fs*0.30+sh2))+" "+
+            n2(PVp.w*K)+" "+n2(sh2*K)+" re f");
+        }
+      }
       if(boxes){
         /* One product to a page.  Canva imports every PDF page on its own, so a
            box can never be glued to its neighbour — and the text stays text. */
         var bxr=Object.keys(cUsed).map(function(nm){ return "/"+nm+" "+cUsed[nm]+" 0 R"; }).join(" ");
-        var bres="<< /Font << "+fontDict()+" >>"+(bxr?" /XObject << "+bxr+" >>":"")+egs+" >>";
+        var bres="<< /Font << "+fontDict()+" >>"+(bxr?" /XObject << "+bxr+" >>":"")+egs+
+          (GSH.length?" /Shading << "+GSH.join(" ")+" >>":"")+" >>";     /* gradient tags and bands */
         var bst=latin1("q 1 0 0 1 "+n2(-cx)+" "+n2(-cyB)+" cm\n"+CC.join("\n")+"\nQ");
         var bcid=add("<< /Length "+bst.length+" >>", bst);
         pageIds.push(add("<< /Type /Page /Parent "+parent+" 0 R /MediaBox [0 0 "+n2(cw)+" "+n2(chh)+
@@ -8084,7 +8087,8 @@ async function buildVectorPDF(mode){
       }
       if(grp){
         var cxr=Object.keys(cUsed).map(function(nm){ return "/"+nm+" "+cUsed[nm]+" 0 R"; }).join(" ");
-        var cres="<< /Font << "+fontDict()+" >>"+(cxr?" /XObject << "+cxr+" >>":"")+egs+" >>";
+        var cres="<< /Font << "+fontDict()+" >>"+(cxr?" /XObject << "+cxr+" >>":"")+egs+
+          (GSH.length?" /Shading << "+GSH.join(" ")+" >>":"")+" >>";
         /* Clip hard to this box, and let the BBox be exactly the box.  Anything
            that tried to spill into the neighbouring product is cut off, so the
            importer cannot glue two boxes into one object. */
@@ -8649,7 +8653,9 @@ async function buildSinglePDF(){
     } else id=add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
     FC[mk]={id:id,res:res}; return FC[mk];
   }
-  var FN=pdfFont(nameK()), FP=pdfFont(priceK());
+  /* "Standard PDF font" on the flyer holds for the single pages too */
+  var STD=!!S.pdfStdFont, nmk=STD?"helv":nameK(), pmk=STD?"helv":priceK();
+  var FN=pdfFont(nmk), FP=pdfFont(pmk);
   function fontDict(){ var o=[]; for(var k in FC) o.push("/"+FC[k].res+" "+FC[k].id+" 0 R"); return o.join(" "); }
   function txtOp(str,fres,mk,pt,colour,x,y,anchor){
     var full=textEmK(String(str),mk)*pt;
@@ -8720,7 +8726,7 @@ async function buildSinglePDF(){
       }
     }
     if(sp.showMark)
-      C.push(txtOp(BRANCHES[S.branch].name, FN.res, nameK(), 10, "1 1 1", 5*K, Y(9), "start"));
+      C.push(txtOp(BRANCHES[S.branch].name, FN.res, nmk, 10, "1 1 1", 5*K, Y(9), "start"));
     for(var si=0; si<F.rects.length; si++){
       var R=F.rects[si], p=group[si]||null;
       var rad=Math.min(sp.cardR, R.w/2, R.h/2)*K;
@@ -8744,7 +8750,7 @@ async function buildSinglePDF(){
       if(L.cut) continue;
       var npt=L.fs/0.3528;
       for(var k=0;k<L.lines.length;k++)
-        C.push(txtOp(L.lines[k], FN.res, nameK(), npt, col(sp.nameC),
+        C.push(txtOp(L.lines[k], FN.res, nmk, npt, col(sp.nameC),
           L.nameX*K, Y(L.nameY0+k*L.fs*1.12), "start"));
       if(L.ar){
         var AA2=await arAsset(L.ar.t, L.ar.fs, (S.theme.arC||sp.nameC));
@@ -8757,19 +8763,19 @@ async function buildSinglePDF(){
       if(L.price!==""){
         var g=L.tag.geom, ox=L.tag.x, oy=L.tag.y;
         g.polys.forEach(function(Pg){ C.push(polyOp(Pg,ox,oy)); });
-        g.statics.forEach(function(T){ C.push(txtOp(T.t, FP.res, priceK(), T.size/0.3528, col(T.fill),
+        g.statics.forEach(function(T){ C.push(txtOp(T.t, FP.res, pmk, T.size/0.3528, col(T.fill),
           (ox+T.x)*K, Y(oy+T.y), T.anchor)); });
         var PR=g.price;
         priceRuns(PR, L.price).forEach(function(R){
-          C.push(txtOp(R.t, FP.res, priceK(), R.size/0.3528, col(PR.fill), (ox+R.x)*K, Y(oy+R.y), R.anchor)); });
+          C.push(txtOp(R.t, FP.res, pmk, R.size/0.3528, col(PR.fill), (ox+R.x)*K, Y(oy+R.y), R.anchor)); });
       }
       if(L.prev){
         var PVp=L.prev, pcp=col(S.theme.prevC||"#9aa3ad");
         if(PVp.chip) C.push(col(S.theme.prevBg||"#ffffff")+" rg "+
           rr(PVp.chip.x*K, Y(PVp.chip.y+PVp.chip.h), PVp.chip.w*K, PVp.chip.h*K, PVp.chip.r*K)+" f");
-        if(PVp.label) C.push(txtOp(PVp.label.t, FP.res, priceK(), PVp.label.fs/0.3528, pcp,
+        if(PVp.label) C.push(txtOp(PVp.label.t, FP.res, pmk, PVp.label.fs/0.3528, pcp,
           PVp.label.x*K, Y(PVp.label.y), "start"));
-        C.push(txtOp(PVp.t, FP.res, priceK(), PVp.fs/0.3528, pcp, PVp.x*K, Y(PVp.y), "start"));
+        C.push(txtOp(PVp.t, FP.res, pmk, PVp.fs/0.3528, pcp, PVp.x*K, Y(PVp.y), "start"));
         if(PVp.strike){
           var sh2=Math.max(0.16,PVp.fs*0.09);
           C.push(pcp+" rg "+n2(PVp.x*K)+" "+n2(Y(PVp.y-PVp.fs*0.30+sh2))+" "+n2(PVp.w*K)+" "+n2(sh2*K)+" re f");
@@ -8779,7 +8785,7 @@ async function buildSinglePDF(){
         var bdx=L.badge.x, bdy=L.badge.y;
         L.badge.geom.polys.forEach(function(P){ C.push(polyOp(P,bdx,bdy)); });
         L.badge.geom.texts.forEach(function(T){
-          C.push(txtOpRot(T.t, FP.res, priceK(), T.size/0.3528, col(T.fill),
+          C.push(txtOpRot(T.t, FP.res, pmk, T.size/0.3528, col(T.fill),
             (bdx+T.x)*K, Y(bdy+T.y), "middle", T.rot)); });
       }
     }
