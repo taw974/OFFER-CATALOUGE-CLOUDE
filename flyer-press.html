@@ -474,6 +474,7 @@ body.exporting .zoneov,body.bare .zoneov{display:none !important}
 .tagx{position:absolute;pointer-events:auto;z-index:4}
 .tagx .tsvg{pointer-events:none}
 .tagx .pv{font-weight:900;font-family:var(--priceFont);white-space:nowrap;line-height:1;outline:none}
+.tagx .pv .pw,.tagx .pv .pd{white-space:nowrap;line-height:1}
 .tagx .pv:focus{outline:2px solid #111;outline-offset:1px;background:rgba(255,255,255,.55);border-radius:1px}
 .card.blank .tagx{opacity:.45}
 /* the box that Ctrl+V will land in */
@@ -1140,6 +1141,13 @@ body.exporting .page{box-shadow:none}
           <option value="two">Always two decimals — 3 becomes 3.00</option>
           <option value="none">Whole numbers — 3.25 becomes 3</option>
         </select>
+        <label class="inline" style="margin-top:8px"><input type="checkbox" id="smallDecOn">Small decimals — 10.25 shows a big 10 and a small .25</label>
+        <div class="g2" id="smallDecBox">
+          <div><label>Decimal size — <span id="smallDecSzV">55</span>%</label>
+          <input type="range" id="smallDecSz" min="30" max="90" step="1" value="55"></div>
+          <div><label>Decimals sit</label>
+          <select id="smallDecPos"><option value="top">Raised — level with the top</option><option value="mid">In the middle</option><option value="base">On the line</option></select></div>
+        </div>
 </div>
 
         <label class="h2">Category headings</label>
@@ -1610,6 +1618,46 @@ function textEmK(str,k){ var m=METRICS[k]||HELVW, t=0;
   for(var i=0;i<str.length;i++) t+=(m[str.charAt(i)]||600); return t/1000; }
 function textEm(str,k){ return textEmK(String(str), k||nameK()); }
 function textW(str,fs,k){ return textEmK(String(str), k||nameK())*fs; }
+/* ---- small decimals: 10.25 is drawn as a big "10" and a small ".25" ----
+   One split, used by the tag size, the tag geometry and every renderer, so the
+   screen, the PNG, the SVG and the PDF all draw the same two pieces.        */
+function smallDecOn(){ return !!(S.smallDec && S.smallDec.on); }
+function smallDecScale(){ var v=parseFloat(S.smallDec&&S.smallDec.size); return (isFinite(v)?Math.max(30,Math.min(90,v)):55)/100; }
+function splitPrice(str){
+  if(!smallDecOn()) return null;
+  var m=/^(.*?\d)([.,]\d+)$/.exec(String(str==null?"":str));
+  return m ? {i:m[1], d:m[2]} : null;
+}
+function capK(k){ return (typeof FONTDATA!=="undefined" && FONTDATA[k] && FONTDATA[k].cap) ? FONTDATA[k].cap/1000 : 0.718; }
+/* how wide a price is, with its small decimals */
+function priceW(str,fs,k){
+  k=k||priceK(); var sp=splitPrice(str);
+  return sp ? textW(sp.i,fs,k)+textW(sp.d,fs*smallDecScale(),k) : textW(str,fs,k);
+}
+/* the price as one or two runs of text, each start-anchored at its own baseline */
+function priceRuns(PR, str){
+  str=String(str==null?"":str);
+  var k=priceK(), sp=splitPrice(str);
+  if(!sp) return [{t:str, x:PR.x, y:PR.y, size:PR.size, anchor:PR.anchor==="middle"?"middle":"start"}];
+  var F=PR.size, f=F*smallDecScale(), wI=textW(sp.i,F,k), wD=textW(sp.d,f,k);
+  var x0=(PR.anchor==="middle") ? PR.x-(wI+wD)/2 : PR.x;
+  return [{t:sp.i, x:x0, y:PR.y, size:F, anchor:"start"},
+          {t:sp.d, x:x0+wI, y:PR.y-smallDecLift(F,f,k), size:f, anchor:"start", dec:true}];
+}
+/* how far the small part is lifted off the baseline: top = level with the top of the big digits */
+function smallDecLift(F,f,k){
+  var pos=(S.smallDec&&S.smallDec.pos)||"top", c=capK(k||priceK());
+  return pos==="top" ? c*(F-f) : pos==="mid" ? c*(F-f)/2 : 0;
+}
+/* the price on screen: one line, with the decimals in their own smaller span */
+function priceInnerHTML(str, size){
+  str=String(str==null?"":str);
+  var sp=splitPrice(str);
+  if(!sp) return escH(str);
+  var f=size*smallDecScale();
+  return '<span class="pw">'+escH(sp.i)+'<span class="pd" style="font-size:'+n2(f/0.3528)+'pt;vertical-align:'+
+    n2(smallDecLift(size,f))+'mm">'+escH(sp.d)+'</span></span>';
+}
 
 function injectFontFaces(){
   if(typeof FONTDATA==="undefined") return;
@@ -1803,12 +1851,12 @@ function tagSize(tp, price, priceFs, qrOn, cw, ch, minFrac){
   if(minFrac==null) minFrac=0.36;
   if(price==="") return {w:0,h:0};
   if(tp.shape==="badge"){
-    var d=Math.max(textW(price,priceFs,priceK())+priceFs*1.45, priceFs*2.15,
+    var d=Math.max(priceW(price,priceFs)+priceFs*1.45, priceFs*2.15,
                    Math.min(cw,ch)*(minFrac*0.94));
     d=Math.min(d, cw-2*TAGPAD-0.6, ch-2*TAGPAD-0.6);
     return {w:d, h:d};
   }
-  var body=textW(price,priceFs,priceK())+priceFs*0.6;
+  var body=priceW(price,priceFs)+priceFs*0.6;
   var pre0=tagPrefix(tp,qrOn), suf0=tagSuffix(tp,qrOn), cs0=priceFs*curScale();
   if(pre0) body+=textW(pre0,cs0,priceK())+priceFs*0.22;
   if(suf0) body+=textW(suf0,cs0,priceK())+priceFs*0.22;
@@ -1868,7 +1916,7 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
       var pfB=Math.min(priceFs, H/1.32);
       var baseS=H*0.5+pfB*0.36;
       if(preS||sufS){
-        var csS=pfB*curScale(), pwS=textW(price,pfB,priceK());
+        var csS=pfB*curScale(), pwS=priceW(price,pfB);
         var qwS=preS?(textW(preS,csS,priceK())+pfB*0.2):0, swS=sufS?(textW(sufS,csS,priceK())+pfB*0.2):0;
         var sxS=sl+((W-2*sl)-(pwS+qwS+swS))/2;
         if(preS) g.statics.push({t:preS, x:sxS, y:baseS-pfB*0.06, size:csS, fill:colFg, anchor:"start"});
@@ -1905,7 +1953,7 @@ function tagGeom(tp, W, H, price, priceFs, qrOn, colBg, colFg){
   var baseY=H*0.5+priceFs*0.36;
   if(pre){
     var cs=priceFs*curScale();
-    var pw=textW(price,priceFs,priceK());
+    var pw=priceW(price,priceFs);
     var qw=preT?(textW(preT,cs,priceK())+priceFs*0.2):0;
     var sw=sufT?(textW(sufT,cs,priceK())+priceFs*0.2):0;
     var sx=innerX+(innerW-(pw+qw+sw))/2;
@@ -1997,7 +2045,7 @@ function mkId(branch, code, name, taken){
    grid, a page count on Muaither and H1 never hears about it. */
 var WSKEYS=["mode","products","blanks","raw","map","pages","theme","headerPct","tpl","sortBy",
   "slotMode","slotModeUser","maxSlot","showValid","margin","gap","bannerGap","fillMode","centerLast",
-  "font","fontPrice","nameSz","priceSz","autoShrink","decimals","qrPrefix","nameFit",
+  "font","fontPrice","nameSz","priceSz","autoShrink","decimals","smallDec","qrPrefix","nameFit",
   "validX","validY","validW","validSz","validRound","validDate","validBgMode","validFont",
   "validWeight","validUline","validTwo","showAr","arScale","showPrev","catHeads",
   "matchStrict","trimImg","imgZoom","imgPad","depts","deptTrustCol","deptBreak","oldP",
@@ -2084,7 +2132,7 @@ var S = {
   branch:"muaither", mode:"blank", products:[], blanks:[], raw:null,
   map:{name:"",price:"",image:"",category:"",code:"",sort:"",show:"",branch:"muaither",perBranch:{}},
   pages:[{cols:7,rows:5},{cols:7,rows:8}],
-  headerPct:30, showValid:true, centerLast:true, showHidden:false, margin:4, autoShrink:true, decimals:'as', bareExport:false, qrPrefix:false, validX:0, validY:0, validW:94,
+  headerPct:30, showValid:true, centerLast:true, showHidden:false, margin:4, autoShrink:true, decimals:'as', smallDec:{on:false,size:55,pos:"top"}, bareExport:false, qrPrefix:false, validX:0, validY:0, validW:94,
   bannerGap:3, fillMode:"even", showBadge:true, showTools:true, zoom:1, covers:[], nameAlign:"auto",
   cur:{label:"QR", pos:"before", size:62},
   imgSh:{k:"none",c:"#000000",op:35,blur:1.8,dx:0.6,dy:1.0,size:0.5},
@@ -2158,7 +2206,7 @@ function snapshotObj(lite){
   return {branch:S.branch, ws:(lite?undefined:S.ws), branchDefs:JSON.parse(JSON.stringify(BRANCHES)),mode:S.mode,products:S.products,blanks:S.blanks,map:S.map,raw:(lite?undefined:S.raw),
     bannerGap:S.bannerGap,fillMode:S.fillMode,showBadge:S.showBadge,showTools:S.showTools,showMarks:S.showMarks,cur:S.cur,zoom:S.zoom,covers:S.covers,
     imgSh:S.imgSh,boxSh:S.boxSh,bgCut:S.bgCut,bgTol:S.bgTol,imgMax:S.imgMax,badge:S.badge,
-    pages:S.pages,headerPct:S.headerPct,showValid:S.showValid,centerLast:S.centerLast,margin:S.margin,autoShrink:S.autoShrink,bareExport:S.bareExport,qrPrefix:S.qrPrefix,decimals:S.decimals,validX:S.validX,validY:S.validY,validW:S.validW,
+    pages:S.pages,headerPct:S.headerPct,showValid:S.showValid,centerLast:S.centerLast,margin:S.margin,autoShrink:S.autoShrink,bareExport:S.bareExport,qrPrefix:S.qrPrefix,decimals:S.decimals,smallDec:S.smallDec,validX:S.validX,validY:S.validY,validW:S.validW,
     tpl:S.tpl,pdfGroup:S.pdfGroup,pdfStdFont:S.pdfStdFont,sortBy:S.sortBy,gap:S.gap,view:S.view,sp:S.sp,
     share:S.share,validSz:S.validSz,validRound:S.validRound,validDate:S.validDate,validBgMode:S.validBgMode,validFont:S.validFont,
     validWeight:S.validWeight,validUline:S.validUline,validTwo:S.validTwo,showAr:S.showAr,arScale:S.arScale,
@@ -2277,7 +2325,7 @@ function restore(s){
   if(o.cur) S.cur=o.cur;
   if(o.covers) S.covers=o.covers;
   if(o.margin!=null)S.margin=o.margin; if(o.autoShrink!=null)S.autoShrink=o.autoShrink;
-  S.qrPrefix=!!o.qrPrefix; if(o.decimals)S.decimals=o.decimals; if(o.validX!=null)S.validX=o.validX;
+  S.qrPrefix=!!o.qrPrefix; if(o.decimals)S.decimals=o.decimals; if(o.smallDec)S.smallDec=o.smallDec; if(o.validX!=null)S.validX=o.validX;
   if(o.validY!=null)S.validY=o.validY; if(o.validW!=null)S.validW=o.validW;
   if(o.tpl)S.tpl=o.tpl; if(o.pdfGroup)S.pdfGroup=o.pdfGroup; if(o.sortBy)S.sortBy=o.sortBy;
   S.pdfStdFont=!!o.pdfStdFont;
@@ -4897,7 +4945,8 @@ function tplPreviewSVG(tp){
     }
     g.polys.forEach(function(P){ sv+=polySVG(P,ox,oy); });
     g.statics.forEach(function(T){ sv+='<text x="'+n2(ox+T.x)+'" y="'+n2(oy+T.y)+'" font-size="'+n2(T.size)+'" fill="'+T.fill+'" text-anchor="'+(T.anchor||"start")+'">'+escX(T.t)+'</text>'; });
-    if(g.price) sv+='<text x="'+n2(ox+g.price.x)+'" y="'+n2(oy+g.price.y)+'" font-size="'+n2(g.price.size)+'" fill="'+g.price.fill+'" text-anchor="'+(g.price.anchor||"start")+'">9.50</text>';
+    if(g.price) priceRuns(g.price, "9.50").forEach(function(R){
+      sv+='<text x="'+n2(ox+R.x)+'" y="'+n2(oy+R.y)+'" font-size="'+n2(R.size)+'" fill="'+g.price.fill+'" text-anchor="'+R.anchor+'">'+escX(R.t)+'</text>'; });
     return sv+'</svg>';
   }catch(e){ return '<svg viewBox="0 0 44 20"></svg>'; }
 }
@@ -5145,7 +5194,7 @@ function tagHTML(c,L){
   var pv='<span class="pv" contenteditable="true" spellcheck="false" data-f="price" style="position:absolute;left:'+
     n2(pb.x)+'mm;top:'+n2(pb.y)+'mm;width:'+n2(pb.w)+'mm;height:'+n2(pb.h)+'mm;font-size:'+
     n2(g.price.size/0.3528)+'pt;color:'+g.price.fill+';display:flex;align-items:center;justify-content:'+
-    (g.price.anchor==="middle"?"center":"flex-start")+'">'+escH(c.price)+'</span>';
+    (g.price.anchor==="middle"?"center":"flex-start")+'" data-v="'+escH(c.price)+'">'+priceInnerHTML(c.price, g.price.size)+'</span>';
   return '<div class="tagx" style="left:'+n2(c.tag.x)+'mm;top:'+n2(c.tag.y)+'mm;width:'+n2(W)+'mm;height:'+n2(H)+'mm">'+
     sv+pv+'</div>';
 }
@@ -5300,6 +5349,8 @@ function wireCards(){
         /* while you are in the box it is one plain line — so selecting and
            copying gives you one line, not three */
         if(el.getAttribute("data-f")==="name") el.textContent=t;
+        /* a price drawn with small decimals is typed as one plain number */
+        if(el.getAttribute("data-f")==="price") el.textContent=el.getAttribute("data-v")||t;
       });
       el.addEventListener("keydown",function(e){ if(e.key==="Enter"){e.preventDefault();el.blur();} });
       el.addEventListener("blur",function(){
@@ -7226,9 +7277,10 @@ async function buildSVGs(){
             '" font-size="'+n2(T.size)+'" font-weight="bold" text-anchor="'+(T.anchor==="middle"?"middle":"start")+
             '" fill="'+T.fill+'">'+escX(T.t)+'</text>'); });
         var PR=G.price;
-        s.push('<text x="'+n2(ox+PR.x)+'" y="'+n2(oy+PR.y)+'" font-family="'+fstack(S.fontPrice||S.font)+
-          '" font-size="'+n2(PR.size)+'" font-weight="bold" text-anchor="'+(PR.anchor==="middle"?"middle":"start")+
-          '" fill="'+PR.fill+'">'+escX(c.price)+'</text>');
+        priceRuns(PR, c.price).forEach(function(R){      /* one <text> per run — Canva keeps each as it is */
+          s.push('<text x="'+n2(ox+R.x)+'" y="'+n2(oy+R.y)+'" font-family="'+fstack(S.fontPrice||S.font)+
+            '" font-size="'+n2(R.size)+'" font-weight="bold" text-anchor="'+R.anchor+
+            '" fill="'+PR.fill+'">'+escX(R.t)+'</text>'); });
       }
       if(grp) s.push('</g>');
     }
@@ -7552,8 +7604,8 @@ async function buildVectorPDF(mode){
           CC.push(txtOp(T.t, FP.res, pmk, T.size/0.3528, col(T.fill),
             (ox+T.x)*K, Y(oy+T.y), T.anchor)); });
         var PR=G.price;
-        CC.push(txtOp(c.price, FP.res, pmk, PR.size/0.3528, col(PR.fill),
-          (ox+PR.x)*K, Y(oy+PR.y), PR.anchor));
+        priceRuns(PR, c.price).forEach(function(R){
+          CC.push(txtOp(R.t, FP.res, pmk, R.size/0.3528, col(PR.fill), (ox+R.x)*K, Y(oy+R.y), R.anchor)); });
       }
 
       if(boxes){
@@ -7881,7 +7933,7 @@ function slotHTML(p,R){
       '<span class="pv" style="position:absolute;left:'+n2(pb.x)+'mm;top:'+n2(pb.y)+'mm;width:'+n2(pb.w)+
       'mm;height:'+n2(pb.h)+'mm;font-size:'+n2(g.price.size/0.3528)+'pt;color:'+g.price.fill+
       ';display:flex;align-items:center;justify-content:'+(g.price.anchor==="middle"?"center":"flex-start")+
-      '">'+escH(L.price)+'</span></div>';
+      '">'+priceInnerHTML(L.price, g.price.size)+'</span></div>';
   }
   if(L.prev){
     var PVc=L.prev, pcol=(S.theme.prevC||"#9aa3ad");
@@ -8237,8 +8289,8 @@ async function buildSinglePDF(){
         g.statics.forEach(function(T){ C.push(txtOp(T.t, FP.res, priceK(), T.size/0.3528, col(T.fill),
           (ox+T.x)*K, Y(oy+T.y), T.anchor)); });
         var PR=g.price;
-        C.push(txtOp(L.price, FP.res, priceK(), PR.size/0.3528, col(PR.fill),
-          (ox+PR.x)*K, Y(oy+PR.y), PR.anchor));
+        priceRuns(PR, L.price).forEach(function(R){
+          C.push(txtOp(R.t, FP.res, priceK(), R.size/0.3528, col(PR.fill), (ox+R.x)*K, Y(oy+R.y), R.anchor)); });
       }
       if(L.prev){
         var PVp=L.prev, pcp=col(S.theme.prevC||"#9aa3ad");
@@ -8481,6 +8533,11 @@ function syncPanel(){
   document.getElementById("arVal").textContent=Math.round((S.arScale||0.92)*100);
   document.getElementById("bigFrom").value=S.theme.bigFrom;
   document.getElementById("decimals").value=S.decimals;
+  (function(){ var SD=S.smallDec||{};
+    document.getElementById("smallDecOn").checked=!!SD.on;
+    document.getElementById("smallDecSz").value=SD.size||55; document.getElementById("smallDecSzV").textContent=SD.size||55;
+    document.getElementById("smallDecPos").value=SD.pos||"top";
+    document.getElementById("smallDecBox").style.display=SD.on?"":"none"; })();
   fillSelect(document.getElementById("validSz"),
     ["7pt","8pt","9pt","10pt","11pt","12pt","14pt","16pt","20pt"].map(function(v){return {n:v,v:v};}),S.validSz);
   document.getElementById("validRound").value=S.validRound?"1":"0";
@@ -8954,6 +9011,13 @@ document.getElementById("curSize").oninput=function(e){ curCfg().size=+e.target.
   document.getElementById("curSizeV").textContent=e.target.value; renderSoon(); };
 document.getElementById("curSize").onchange=function(){ snap(); saveState(); };
 document.getElementById("decimals").onchange=function(e){ S.decimals=e.target.value; snap(); saveState(); render(); };
+function smallDecCfg(){ if(!S.smallDec) S.smallDec={on:false,size:55,pos:"top"}; return S.smallDec; }
+document.getElementById("smallDecOn").onchange=function(e){ smallDecCfg().on=e.target.checked;
+  document.getElementById("smallDecBox").style.display=e.target.checked?"":"none"; snap(); saveState(); render(); paintTplGallery(); };
+document.getElementById("smallDecSz").oninput=function(e){ smallDecCfg().size=+e.target.value;
+  document.getElementById("smallDecSzV").textContent=e.target.value; renderSoon(); };
+document.getElementById("smallDecSz").onchange=function(){ snap(); saveState(); render(); };
+document.getElementById("smallDecPos").onchange=function(e){ smallDecCfg().pos=e.target.value; snap(); saveState(); render(); paintTplGallery(); };
 document.getElementById("validSz").onchange=function(e){ S.validSz=e.target.value; snap(); saveState(); render(); };
 var VBARPAL=[
  {n:"Canva blue → purple", a:"#2e3192", b:"#a855f7"},
@@ -9110,7 +9174,7 @@ document.getElementById("btnReset").onclick=function(){
     if(wipeAll){ S.ws={}; Object.keys(BRANCHES).forEach(function(k){ clearBranchPhotos(false,k); }); }
     else { if(S.ws) delete S.ws[S.branch]; clearBranchPhotos(false); }
     S.products=[]; S.blanks=[]; S.raw=null; S.mode="blank"; S.map=blankMap(S.branch); S.maxSlot=0;
-    S.pages=defPages(); S.theme=defTheme(S.branch); S.margin=4; S.gap=2; S.autoShrink=true; S.decimals='as'; S.validX=0; S.validY=0; S.validW=94;
+    S.pages=defPages(); S.theme=defTheme(S.branch); S.margin=4; S.gap=2; S.autoShrink=true; S.decimals='as'; S.smallDec={on:false,size:55,pos:"top"}; S.validX=0; S.validY=0; S.validW=94;
     S.font=FONTS[0].v; S.fontPrice=FONTS[1].v; S.nameSz="5.2pt"; S.priceSz="9.5pt";
     document.getElementById("mapper").style.display="none";
     syncPanel(); HIST.stack=[]; HIST.imgs=[]; HIST.i=-1; IMGDELTA=null; snap(); render(); });
@@ -10006,6 +10070,7 @@ var FIND_EXTRA={
   cardR:"box corner round radius",
   bigFrom:"big price colour from",
   decimals:"price decimal format 00 paisa",
+  smallDecOn:"small decimals superscript cents paisa smaller .25 raised",
   showAr:"arabic second language name",
   arScale:"arabic size",
   showPrev:"old price was crossed strike discount before two prices",
@@ -11123,7 +11188,7 @@ DB.open().then(decideFresh).then(function(fr){ FRESH=fr; return fr?freshBoot():n
     S.showValid=sv.showValid!==false; S.centerLast=sv.centerLast!==false;
     if(sv.margin!=null)S.margin=sv.margin; S.autoShrink=sv.autoShrink!==false;
     S.bareExport=!!sv.bareExport; S.qrPrefix=!!sv.qrPrefix;
-    if(sv.decimals)S.decimals=sv.decimals; if(sv.validX!=null)S.validX=sv.validX;
+    if(sv.decimals)S.decimals=sv.decimals; if(sv.smallDec)S.smallDec=sv.smallDec; if(sv.validX!=null)S.validX=sv.validX;
     if(sv.validY!=null)S.validY=sv.validY; if(sv.validW!=null)S.validW=sv.validW;
     if(sv.branchDefs&&Object.keys(sv.branchDefs).length){ BRANCHES=sv.branchDefs; rebuildPriceCols(); }
     S.ws=sv.ws||{};
